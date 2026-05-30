@@ -1,0 +1,30 @@
+# Hermes DeFi Autonomy Module — LIVE MODE dependencies.
+# Install with: pip install -r requirements-live.txt
+#
+# Live mode includes blockchain interaction libraries for EVM and Solana.
+# Required for Level 2+ signing, broadcast, and on-chain position management.
+# ONLY install this when autonomy_level >= 2 and real RPC is configured.
+#
+# NOTE: solana 0.35.x requires solders >=0.21.0,<0.22.0.
+# We pin solders to 0.21.6 for compatibility.
+#
+# Compatible with Ubuntu 24.04 / Python 3.11–3.12.
+
+# Core (same as dry)
+httpx==0.27.2
+requests==2.32.3
+jsonschema==4.23.0
+pydantic==2.9.2
+ulid-py==1.1.0
+
+# EVM (Ethereum/Base/BNB Chain)
+eth-account==0.13.4
+web3==7.4.0
+
+# Solana (compatible versions)
+solders==0.21.6
+solana==0.35.1
+
+# Test dependencies
+pytest==8.3.3
+hypothesis==6.115.5

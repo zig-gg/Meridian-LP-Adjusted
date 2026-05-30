@@ -1,0 +1,43 @@
+[project]
+name = "hermes-defi-autonomy"
+version = "0.1.0"
+description = "Hermes DeFi Autonomy Module — capital-preservation autonomy for a $10–$25 sandbox wallet."
+requires-python = ">=3.11,<3.13"
+readme = "manifesto.md"
+license = { text = "Proprietary" }
+
+# Pinned runtime dependencies. Versions are exact pins (==) so that a fresh
+# install on the Hermes VPS always reproduces the audited dependency graph.
+# v1 (Phase 0) installs nothing yet; this file is the contract for what will be
+# installed when Phase 1+ logic lands.
+dependencies = [
+    "httpx==0.27.2",
+    "requests==2.32.3",
+    "jsonschema==4.23.0",
+    "pydantic==2.9.2",
+    "ulid-py==1.1.0",
+    "eth-account==0.13.4",
+    "web3==7.4.0",
+    "solders==0.23.0",
+    "solana==0.35.1"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==8.3.3",
+    "hypothesis==6.115.5"
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["defi_autonomy*"]
+exclude = ["tests*"]

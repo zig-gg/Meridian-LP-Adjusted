@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "source_id": "xstocks",
+      "adapter_name": "xstocks_adapter",
+      "domains": ["docs.xstocks.fi", "defi.xstocks.fi"],
+      "methods": ["GET", "HEAD"],
+      "max_freshness_seconds": 3600,
+      "fetch_timeout_seconds": 10,
+      "max_response_bytes": 1048576,
+      "source_confidence_score": 0.7,
+      "notes": "Tokenized equity reference; thematic anchor for v1."
+    },
+    {
+      "source_id": "meteora",
+      "adapter_name": "meteora_adapter",
+      "domains": ["app.meteora.ag", "dlmm-api.meteora.ag", "amm-v2-api.meteora.ag"],
+      "methods": ["GET", "HEAD"],
+      "max_freshness_seconds": 600,
+      "fetch_timeout_seconds": 10,
+      "max_response_bytes": 2097152,
+      "source_confidence_score": 0.7,
+      "notes": "Solana-side DEX; one_of_many_venues per DR-002."
+    },
+    {
+      "source_id": "stablecoin_benchmark",
+      "adapter_name": "stablecoin_benchmark_adapter",
+      "domains": ["yields.llama.fi", "api.llama.fi"],
+      "methods": ["GET", "HEAD"],
+      "max_freshness_seconds": 1800,
+      "fetch_timeout_seconds": 10,
+      "max_response_bytes": 4194304,
+      "source_confidence_score": 0.8,
+      "notes": "Stablecoin-lending and stable-stable LP benchmark per DR-001."
+    },
+    {
+      "source_id": "defillama",
+      "adapter_name": "defillama_adapter",
+      "domains": ["api.llama.fi", "yields.llama.fi"],
+      "methods": ["GET", "HEAD"],
+      "max_freshness_seconds": 1800,
+      "fetch_timeout_seconds": 10,
+      "max_response_bytes": 4194304,
+      "source_confidence_score": 0.7,
+      "notes": "Cross-protocol TVL and yield reference."
+    },
+    {
+      "source_id": "coingecko",
+      "adapter_name": "coingecko_adapter",
+      "domains": ["api.coingecko.com"],
+      "methods": ["GET", "HEAD"],
+      "max_freshness_seconds": 600,
+      "fetch_timeout_seconds": 10,
+      "max_response_bytes": 1048576,
+      "source_confidence_score": 0.7,
+      "notes": "Public price feed; no authenticated endpoints."
+    },
+    {
+      "source_id": "protocol_status",
+      "adapter_name": "protocol_status_adapter",
+      "domains": ["status.aave.com", "status.compound.finance"],
+      "methods": ["GET", "HEAD"],
+      "max_freshness_seconds": 900,
+      "fetch_timeout_seconds": 10,
+      "max_response_bytes": 524288,
+      "source_confidence_score": 0.6,
+      "notes": "Public status pages; HTML/script strip applied per R24.19."
+    },
+    {
+      "source_id": "manual",
+      "adapter_name": "manual_source_adapter",
+      "domains": [],
+      "methods": ["GET"],
+      "max_freshness_seconds": 86400,
+      "fetch_timeout_seconds": 0,
+      "max_response_bytes": 1,
+      "source_confidence_score": 0.5,
+      "notes": "Operator-curated overrides loaded from data/manual_source_overrides.json. No outbound network calls."
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "mode": "CAPPED_AUTONOMY",
+  "autonomy_level": 1,
+  "sandbox_wallet_address": null,
+  "max_wallet_value_usd": 25,
+  "max_tx_usd": 5,
+  "max_daily_spend_usd": 10,
+  "max_open_positions": 2,
+  "min_stable_reserve_pct": 50,
+  "max_slippage_bps": 50,
+  "allowed_chains": ["Base", "BNB Chain", "Solana"],
+  "allowed_strategy_types": [
+    "stablecoin_lending",
+    "stable_stable_lp",
+    "xstocks_points",
+    "xstocks_lp"
+  ],
+  "blocked_actions": [
+    "bridge",
+    "borrow",
+    "leverage",
+    "unknown_contract",
+    "unlimited_approval",
+    "main_wallet_access",
+    "seed_phrase_storage"
+  ],
+  "require_contract_allowlist": true,
+  "require_token_allowlist": true,
+  "require_pool_allowlist": true,
+  "require_tx_simulation": true,
+  "kill_switch_file": "/root/hermes-agent/defi_autonomy/STOP",
+  "simulation_value_tolerance_bps": 50,
+  "allowlist_change_cooldown_seconds": 3600,
+  "learning_bias_clamp_points": 5,
+  "telegram_authorized_chat_ids": [],
+  "telegram_approval_timeout_seconds": 300
+}

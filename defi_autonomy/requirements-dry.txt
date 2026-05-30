@@ -1,0 +1,19 @@
+# Hermes DeFi Autonomy Module — DRY MODE dependencies.
+# Install with: pip install -r requirements-dry.txt
+#
+# Dry mode runs the full pipeline (ingestion, scoring, policy, simulation,
+# coordinator, learning) WITHOUT real blockchain interaction.
+# No Solana/Web3 signing libraries are required.
+# No private keys, RPC URLs, or wallet credentials needed.
+#
+# Compatible with Ubuntu 24.04 / Python 3.11–3.12.
+
+httpx==0.27.2
+requests==2.32.3
+jsonschema==4.23.0
+pydantic==2.9.2
+ulid-py==1.1.0
+
+# Test dependencies (included for convenience)
+pytest==8.3.3
+hypothesis==6.115.5

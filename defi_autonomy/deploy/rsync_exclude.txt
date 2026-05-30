@@ -1,0 +1,30 @@
+# Rsync exclude list for Hermes DeFi Autonomy deployment.
+# Excludes dev caches, secrets, venvs, ledgers, and generated data.
+
+.venv*
+.git
+.pytest_cache
+.hypothesis
+__pycache__
+*.pyc
+*.pyo
+node_modules
+.env
+.env.raw
+.envrypt
+*.pem
+*.key
+
+# Generated data files (recreated by dry cycle)
+data/*.jsonl
+data/cycle_report.json
+data/raw_snapshots.json
+data/normalized_yield_candidates.json
+data/source_health.json
+data/kanban_board.json
+
+# IDE/editor
+.vscode
+.idea
+*.swp
+*.swo

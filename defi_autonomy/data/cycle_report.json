@@ -1,0 +1,25 @@
+{
+  "approved_count": 0,
+  "autonomy_level": 1,
+  "candidate_count": 10,
+  "cycle_id": "coord_20260527T033817Z_97538",
+  "denied_count": 10,
+  "errors": [],
+  "finished_at_utc": "2026-05-27T03:38:17Z",
+  "ingestion_status": "OK",
+  "learning_bias_applied_count": 0,
+  "learning_events_loaded": 0,
+  "ledger_paths": {
+    "cycle_report": "C:\\dev\\meridian\\defi_autonomy\\data\\cycle_report.json",
+    "execution_ledger": "C:\\dev\\meridian\\defi_autonomy\\data\\execution_ledger.jsonl",
+    "simulation_ledger": "C:\\dev\\meridian\\defi_autonomy\\data\\simulation_ledger.jsonl",
+    "wallet_execution_ledger": "C:\\dev\\meridian\\defi_autonomy\\data\\wallet_execution_ledger.jsonl"
+  },
+  "risk_assessment_count": 10,
+  "signing_prepared_count": 0,
+  "simulation_failed_count": 0,
+  "simulation_passed_count": 0,
+  "started_at_utc": "2026-05-27T03:38:17Z",
+  "status": "COMPLETE",
+  "warnings": []
+}

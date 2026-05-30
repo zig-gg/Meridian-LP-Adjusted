@@ -1,0 +1,23 @@
+# Hermes DeFi Autonomy Module — default dependencies.
+#
+# This file installs DRY MODE dependencies only (no blockchain libraries).
+# For live mode with EVM/Solana signing, use: pip install -r requirements-live.txt
+#
+# Dependency profiles:
+#   requirements-dry.txt  — dry/watch mode, no blockchain libs (default)
+#   requirements-live.txt — live mode with EVM + Solana (compatible versions)
+#
+# Known issue (resolved):
+#   solana==0.35.1 requires solders>=0.21.0,<0.22.0
+#   requirements-live.txt pins solders==0.21.6 for compatibility.
+#   Dry mode does not need either package.
+
+httpx==0.27.2
+requests==2.32.3
+jsonschema==4.23.0
+pydantic==2.9.2
+ulid-py==1.1.0
+
+# Test dependencies
+pytest==8.3.3
+hypothesis==6.115.5

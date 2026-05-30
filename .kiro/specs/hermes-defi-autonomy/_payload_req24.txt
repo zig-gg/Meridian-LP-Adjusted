@@ -1,0 +1,34 @@
+
+
+### Requirement 24: External Data Ingestion
+
+**User Story:** As an operator, I want all external yield/protocol/market data to flow through a sandboxed, allowlisted ingestion layer that cannot reach the wallet, modify allowlists, or smuggle instructions into the LLM, so that off-host data sources cannot become an attack surface.
+
+#### Acceptance Criteria
+
+1. THE External_Data_Ingestion component SHALL invoke only source adapters whose `source_id` is present in `data/source_allowlist.json`.
+2. THE External_Data_Ingestion component SHALL load `data/source_allowlist.json` at the start of every cycle and SHALL NOT cache the list across cycles.
+3. THE External_Data_Ingestion component SHALL restrict every outbound HTTP request to the methods declared in the per-source `method_allowlist` (default: `GET`, `HEAD`).
+4. THE External_Data_Ingestion component SHALL restrict every outbound HTTP request to domains declared in the per-source `domains` list, and SHALL NOT follow redirects to off-allowlist domains.
+5. THE External_Data_Ingestion component SHALL NOT perform any authenticated request, MAY NOT send cookies, MAY NOT attach `Authorization` headers, and MAY NOT use any environment variable matching `*_API_KEY`, `*_SECRET`, `*_TOKEN`, or `HERMES_DEFI_SANDBOX_KEY`.
+6. THE External_Data_Ingestion component SHALL NOT scrape Discord, Telegram private chats, exchange accounts, wallet UIs, or any source that requires user credentials.
+7. THE External_Data_Ingestion component SHALL NOT perform browser automation or headless rendering of JavaScript-driven pages.
+8. THE External_Data_Ingestion component SHALL persist a `SOURCE_FETCH` record to Execution_Ledger for every successful adapter invocation including `adapter_name`, `source_id`, `source_url`, `response_sha256`, `bytes`, `data_freshness_seconds`, `source_confidence_score`, and `status`.
+9. THE External_Data_Ingestion component SHALL persist raw responses to `data/raw_snapshots.json` as a bounded ring buffer whose capacity is declared in Risk_Policy as `raw_snapshots_capacity` (default 200) and SHALL NOT exceed that capacity.
+10. THE External_Data_Ingestion component SHALL persist normalized candidates to `data/normalized_yield_candidates.json` using a write-temp-then-rename pattern so that no concurrent reader observes a partial file.
+11. THE External_Data_Ingestion component SHALL persist per-source rolling statistics to `data/source_health.json` including last status, rolling success rate, rolling stale rate, p50/p95 fetch latency, and last error.
+12. WHEN a candidate's `data_freshness_seconds` exceeds the per-source `max_freshness_seconds`, THE External_Data_Ingestion component SHALL set the candidate's `stale_data` field to `true`.
+13. THE Policy_Engine SHALL reject any action descriptor whose underlying candidate has `stale_data == true`, and SHALL log a `POLICY_REJECTION` record with `rule_id = "R-EXT.1"`.
+14. THE Policy_Engine SHALL reject any action descriptor whose `ingestion_attestation` field does not equal the cycle's actual `IngestionResult.attestation`, and SHALL log a `POLICY_REJECTION` record with `rule_id = "R-EXT.2"`.
+15. THE Policy_Engine SHALL reject any action descriptor whose underlying candidate's `adapter_name` is not present in `data/source_allowlist.json`, and SHALL log a `POLICY_REJECTION` record with `rule_id = "R-EXT.3"`.
+16. IF a single source adapter fails (network error, timeout, parse error, schema mismatch, domain block, method block), THEN THE External_Data_Ingestion component SHALL log a `SOURCE_FAILURE` record including `adapter_name`, `error_message`, and `fetch_duration_ms`, and SHALL continue invoking the remaining allowlisted adapters.
+17. IF every allowlisted source adapter returns failure or stale-only output, THEN THE Coordinator SHALL log a `NO_VALID_DATA` record including the attempted source count, failed source count, and stale-only source count, and SHALL end the cycle without invoking Yield_Scanner, Risk_Scorer, LLM_Proposer, Policy_Engine, Tx_Simulator, or Wallet_Executor.
+18. THE External_Data_Ingestion component SHALL strip HTML tags, script tags, style tags, and comment blocks from any free-form text field before persisting it to `raw_snapshots.json` or `normalized_yield_candidates.json`.
+19. THE Coordinator SHALL NOT include raw scraped text, source response bodies, or any free-form text field from `raw_snapshots.json` in any LLM_Proposer prompt; LLM prompts SHALL contain only normalized numeric and categorical fields from `NormalizedCandidate`.
+20. THE External_Data_Ingestion component SHALL NOT modify, append to, remove from, or otherwise mutate `data/risk_policy.json`, `data/contract_allowlist.json`, `data/token_allowlist.json`, `data/pool_allowlist.json`, or `data/source_allowlist.json` under any condition.
+21. THE External_Data_Ingestion component SHALL NOT import, reference, or invoke `wallet_executor.py` or any function that produces a signed transaction.
+22. THE External_Data_Ingestion component SHALL NOT issue, validate, or transmit any Policy_Engine approval token.
+23. WHEN the Coordinator starts a cycle, THE Coordinator SHALL compute and log a SHA-256 digest of `data/source_allowlist.json` to Execution_Ledger as a `SOURCE_ALLOWLIST_DIGEST` record.
+24. IF the `source_allowlist.json` digest changes between two consecutive cycles, THEN THE Coordinator SHALL log `ALLOWLIST_CHANGE_DETECTED` with `which = "source_allowlist"` and SHALL pause signing for `allowlist_change_cooldown_seconds`.
+25. THE Yield_Scanner SHALL drop any normalized candidate whose `chain`, contracts, tokens, or pool address is not present in the corresponding execution allowlist, regardless of any signal contained in the source data, marking it `OUT_OF_UNIVERSE`.
+26. THE NormalizedCandidate schema SHALL be enforced as `additionalProperties: false`, and any adapter output that fails schema validation SHALL be discarded with a `SOURCE_FAILURE` record indicating `error_message = "schema_violation"`.

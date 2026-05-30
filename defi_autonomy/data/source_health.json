@@ -1,0 +1,44 @@
+{
+  "defillama": {
+    "consecutive_failures": 0,
+    "last_error_message": null,
+    "last_error_type": null,
+    "last_failure_utc": null,
+    "last_latency_ms": 0.0,
+    "last_success_utc": "2026-05-27T03:38:17Z",
+    "total_failures": 0,
+    "total_successes": 3
+  },
+  "meteora": {
+    "consecutive_failures": 0,
+    "last_error_message": null,
+    "last_error_type": null,
+    "last_failure_utc": null,
+    "last_latency_ms": 0.0,
+    "last_success_utc": "2026-05-27T03:38:17Z",
+    "total_failures": 0,
+    "total_successes": 2
+  },
+  "sources": {},
+  "stablecoin_benchmark": {
+    "consecutive_failures": 0,
+    "last_error_message": null,
+    "last_error_type": null,
+    "last_failure_utc": null,
+    "last_latency_ms": 0.0,
+    "last_success_utc": "2026-05-27T03:38:17Z",
+    "total_failures": 0,
+    "total_successes": 3
+  },
+  "version": 1,
+  "xstocks": {
+    "consecutive_failures": 0,
+    "last_error_message": null,
+    "last_error_type": null,
+    "last_failure_utc": null,
+    "last_latency_ms": 0.1,
+    "last_success_utc": "2026-05-27T03:38:17Z",
+    "total_failures": 0,
+    "total_successes": 2
+  }
+}

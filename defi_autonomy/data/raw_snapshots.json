@@ -1,0 +1,42 @@
+[
+  {
+    "adapter_name": "xstocks_adapter",
+    "fetched_at_utc": "2026-05-27T03:38:17Z",
+    "latency_ms": 0.1,
+    "response_sha256": "8702ed1b0428770b4338f2eb967968e5667f5e46970da4654fa15ec1f943c6a7",
+    "response_size_bytes": 793,
+    "source_id": "xstocks",
+    "status": "SUCCESS",
+    "url": "https://docs.xstocks.fi/api/v1/opportunities"
+  },
+  {
+    "adapter_name": "meteora_adapter",
+    "fetched_at_utc": "2026-05-27T03:38:17Z",
+    "latency_ms": 0.0,
+    "response_sha256": "a665c5ad3abd3951d1cbd5339ba0f846456664339d68e404f2924f3248b85084",
+    "response_size_bytes": 592,
+    "source_id": "meteora",
+    "status": "SUCCESS",
+    "url": "https://app.meteora.ag/pair/all"
+  },
+  {
+    "adapter_name": "stablecoin_benchmark_adapter",
+    "fetched_at_utc": "2026-05-27T03:38:17Z",
+    "latency_ms": 0.0,
+    "response_sha256": "d9a079b092479a618e4011869669a778b58eadcd9e9939f79bf1ff203fafa361",
+    "response_size_bytes": 970,
+    "source_id": "stablecoin_benchmark",
+    "status": "SUCCESS",
+    "url": "https://yields.llama.fi/pools"
+  },
+  {
+    "adapter_name": "defillama_adapter",
+    "fetched_at_utc": "2026-05-27T03:38:17Z",
+    "latency_ms": 0.0,
+    "response_sha256": "d9a079b092479a618e4011869669a778b58eadcd9e9939f79bf1ff203fafa361",
+    "response_size_bytes": 970,
+    "source_id": "defillama",
+    "status": "SUCCESS",
+    "url": "https://api.llama.fi/pools"
+  }
+]

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Meridian
 
 **Autonomous Meteora DLMM liquidity management agent for Solana, powered by LLMs.**
@@ -632,3 +633,6 @@ discord-listener/
 This software is provided as-is, with no warranty. Running an autonomous trading agent carries real financial risk — you can lose funds. Always start with `DRY_RUN=true` to verify behavior before going live. Never deploy more capital than you can afford to lose. This is not financial advice.
 
 The authors are not responsible for any losses incurred through use of this software.
+=======
+# Meridian-LP
+>>>>>>> 786d7b362c1110852e3044bafbda0725aa1ea3db

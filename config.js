@@ -203,6 +203,17 @@ export const config = {
     rsiOverbought: indicatorUserConfig.rsiOverbought ?? 80,
     requireAllIntervals: indicatorUserConfig.requireAllIntervals ?? false,
   },
+
+  // ─── Phase 1: Execution scaffold ────────────────────────────
+  execution: {
+    // scanner | simulate | paper | live
+    // Defaults to "scanner" — safest mode, no on-chain action.
+    mode: u.executionMode ?? process.env.EXECUTION_MODE ?? "scanner",
+    // Whether Telegram approval is required before live execution.
+    approvalRequired: u.approvalRequired ?? true,
+    // Mirror of ALLOW_LIVE_EXECUTION env var — config wins if set.
+    allowLiveExecution: u.allowLiveExecution ?? false,
+  },
 };
 
 /**

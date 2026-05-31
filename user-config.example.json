@@ -1,5 +1,13 @@
 {
   "preset": "custom",
+
+  "_comment_execution": "Phase 1 execution scaffold — safe defaults. See docs/PHASE1_SMALLCAP_EXECUTION.md",
+  "executionMode": "scanner",
+  "approvalRequired": true,
+  "allowLiveExecution": false,
+  "useDiscordSignals": false,
+  "autoSwapAfterClaim": false,
+
   "rpcUrl": "https://pump.helius-rpc.com",
   "llmBaseUrl": "",
   "llmApiKey": "",
@@ -12,6 +20,14 @@
   "maxDeployAmount": 50,
   "gasReserve": 0.2,
   "positionSizePct": 0.35,
+
+  "_comment_smallcap": "Small-cap conservative profile — uncomment and adjust to use",
+  "_smallcap_deployAmountSol": 0.03,
+  "_smallcap_maxPositions": 1,
+  "_smallcap_positionSizePct": 0.10,
+  "_smallcap_gasReserve": 0.05,
+  "_smallcap_executionMode": "simulate",
+  "_smallcap_approvalRequired": true,
 
   "strategy": "bid_ask",
   "minBinsBelow": 35,

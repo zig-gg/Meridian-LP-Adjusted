@@ -22,6 +22,15 @@ import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsO
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
 import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW } from "../config.js";
 import { getRecentDecisions } from "../decision-log.js";
+import { scanPools } from "./scanner.js";
+import {
+  getExecutionMode,
+  checkLiveExecutionAllowed,
+  runExecutionGate,
+  buildBlockedResult,
+  buildExecutionIntent,
+  EXECUTION_MODES,
+} from "../execution-modes.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -210,6 +219,8 @@ function normalizeConfigValue(key, value) {
     "solMode",
     "darwinEnabled",
     "lpAgentRelayEnabled",
+    "approvalRequired",
+    "allowLiveExecution",
   ]);
   const arrayKeys = new Set(["allowedLaunchpads", "blockedLaunchpads"]);
   const stringKeys = new Set([
@@ -226,6 +237,7 @@ function normalizeConfigValue(key, value) {
     "hiveMindPullMode",
     "publicApiKey",
     "agentMeridianApiUrl",
+    "executionMode",
   ]);
   if (value === null) return null;
   if (booleanKeys.has(key)) return coerceBoolean(value, key);
@@ -304,6 +316,99 @@ const toolMap = {
   block_deployer: blockDev,
   unblock_deployer: unblockDev,
   list_blocked_deployers: listBlockedDevs,
+  // ─── Phase 1: Scanner + Execution Scaffold ─────────────────
+  scan_pools: scanPools,
+  execute_intent: async ({ intent_type, pool_address, position_address, amount_sol, approval_token } = {}) => {
+    const executionMode = getExecutionMode();
+
+    // Build the intent object (never contains private key material)
+    let intent;
+    try {
+      intent = buildExecutionIntent(intent_type, {
+        pool_address: pool_address || null,
+        position_address: position_address || null,
+        amount_sol: amount_sol || null,
+      });
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+
+    // In scanner/paper mode: return intent without any gate check or simulation
+    if (executionMode === EXECUTION_MODES.SCANNER || executionMode === EXECUTION_MODES.PAPER) {
+      return {
+        success: true,
+        execution_mode: executionMode,
+        intent,
+        broadcast: false,
+        message: `Intent built in ${executionMode} mode. No simulation or broadcast performed.`,
+      };
+    }
+
+    // In simulate mode: run gate check but don't broadcast
+    if (executionMode === EXECUTION_MODES.SIMULATE) {
+      const liveCheck = checkLiveExecutionAllowed();
+      // In simulate mode we expect the live gate to fail (that's fine)
+      // We just want to show what would happen
+      let balance = { sol: 0 };
+      try {
+        balance = await getWalletBalances();
+      } catch { /* wallet may not be configured */ }
+
+      const deployAmt = amount_sol ?? config.management?.deployAmountSol ?? 0.5;
+      const positions = await getMyPositions().catch(() => ({ total_positions: 0 }));
+
+      return {
+        success: true,
+        execution_mode: executionMode,
+        intent: { ...intent, simulated: true },
+        broadcast: false,
+        wallet_balance_sol: balance.sol,
+        deploy_amount_sol: deployAmt,
+        open_positions: positions.total_positions,
+        live_gate_check: liveCheck,
+        message: `Simulate mode: intent built and gate checked. No broadcast. Live gate: ${liveCheck.allowed ? "PASS" : `BLOCKED (${liveCheck.gate})`}`,
+      };
+    }
+
+    // In live mode: run full gate
+    if (executionMode === EXECUTION_MODES.LIVE) {
+      let balance = { sol: 0 };
+      try {
+        balance = await getWalletBalances();
+      } catch { /* wallet may not be configured */ }
+
+      const deployAmt = amount_sol ?? config.management?.deployAmountSol ?? 0.5;
+      const positions = await getMyPositions().catch(() => ({ total_positions: 0 }));
+      const approvalRequired = config.execution?.approvalRequired ?? true;
+      const approvalPresent = !!approval_token;
+
+      const gateResult = runExecutionGate({
+        deployAmountSol: deployAmt,
+        walletBalanceSol: balance.sol,
+        approvalRequired,
+        approvalPresent,
+        openPositions: positions.total_positions,
+      });
+
+      if (!gateResult.pass) {
+        return buildBlockedResult(gateResult, intent_type);
+      }
+
+      // Gate passed — in Phase 1 we still don't broadcast (scaffold only)
+      // Real broadcast wiring happens in Phase 2+
+      return {
+        success: true,
+        execution_mode: executionMode,
+        intent: { ...intent, simulated: false },
+        broadcast: false,
+        gate_passed: true,
+        wallet_balance_sol: balance.sol,
+        message: "All gates passed. Broadcast scaffold ready — actual broadcast not yet wired in Phase 1.",
+      };
+    }
+
+    return { success: false, error: `Unknown execution mode: ${executionMode}` };
+  },
   add_lesson: ({ rule, tags, pinned, role }) => {
     addLesson(rule, tags || [], { pinned: !!pinned, role: role || null });
     return { saved: true, rule, pinned: !!pinned, role: role || "all" };
@@ -427,6 +532,10 @@ const toolMap = {
       rsiOversold: ["indicators", "rsiOversold", ["chartIndicators", "rsiOversold"]],
       rsiOverbought: ["indicators", "rsiOverbought", ["chartIndicators", "rsiOverbought"]],
       requireAllIntervals: ["indicators", "requireAllIntervals", ["chartIndicators", "requireAllIntervals"]],
+      // Phase 1 execution scaffold
+      executionMode:      ["execution", "mode"],
+      approvalRequired:   ["execution", "approvalRequired"],
+      allowLiveExecution: ["execution", "allowLiveExecution"],
     };
 
     const applied = {};
@@ -663,6 +772,28 @@ export async function executeTool(name, args) {
 async function runSafetyChecks(name, args) {
   switch (name) {
     case "deploy_position": {
+      // ── Phase 1 execution mode gate ──────────────────────────
+      // In scanner/simulate/paper modes, block live broadcast at the executor level.
+      // This is belt-and-suspenders on top of the DRY_RUN check in dlmm.js.
+      const executionMode = getExecutionMode();
+      if (executionMode !== EXECUTION_MODES.LIVE) {
+        // scanner/simulate/paper: allow the call to proceed only if DRY_RUN is set
+        // (dlmm.js will return a dry_run result). If DRY_RUN is not set and mode
+        // is not live, block to prevent accidental broadcast.
+        if (process.env.DRY_RUN !== "true") {
+          return {
+            pass: false,
+            reason: `executionMode is "${executionMode}" but DRY_RUN is not set. Set DRY_RUN=true for non-live modes, or set executionMode=live with all required gates to broadcast.`,
+          };
+        }
+      } else {
+        // live mode: check ALLOW_LIVE_EXECUTION gate
+        const liveCheck = checkLiveExecutionAllowed();
+        if (!liveCheck.allowed) {
+          return { pass: false, reason: liveCheck.reason };
+        }
+      }
+
       const poolThresholds = await validateDeployPoolThresholds(args);
       if (!poolThresholds.pass) return poolThresholds;
 

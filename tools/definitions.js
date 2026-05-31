@@ -1111,6 +1111,87 @@ Blacklisted tokens are filtered BEFORE the LLM even sees pool candidates.`,
       }
     }
   },
+
+  // ═══════════════════════════════════════════
+  //  PHASE 1: SCANNER + EXECUTION SCAFFOLD
+  // ═══════════════════════════════════════════
+  {
+    type: "function",
+    function: {
+      name: "scan_pools",
+      description: `Scan and rank Meteora DLMM pools using normalized scoring.
+
+Returns top candidates with:
+- Composite score (0-100) across: Fee/TVL, Volume/TVL, TVL quality, token risk, holder quality, narrative
+- Risk flags: WASH_TRADING, RUGPULL_RISK, PVP_CONFLICT, BUNDLE_%, SNIPER_%, DISCORD_SIGNAL, KOL_PRESENT
+- Suggested action per pool: SIMULATE / MONITOR / MANUAL_REVIEW / AVOID
+- Telegram-ready summary (no automatic live deploy)
+
+Does NOT require a wallet private key. Safe to call in scanner mode.
+Use this instead of get_top_candidates when you want normalized scoring and action suggestions.`,
+      parameters: {
+        type: "object",
+        properties: {
+          limit: {
+            type: "number",
+            description: "Number of top candidates to return. Default 5."
+          }
+        }
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "execute_intent",
+      description: `Build and evaluate an execution intent for a pool action.
+
+In scanner/simulate/paper modes: builds the intent object and runs the safety gate check,
+but does NOT broadcast any transaction.
+
+In live mode: runs ALL hard safety gates before allowing broadcast:
+  - DRY_RUN must be false
+  - ALLOW_LIVE_EXECUTION must be true
+  - executionMode must be "live"
+  - BOT_WALLET_PRIVATE_KEY must be present
+  - Wallet balance must be sufficient
+  - Position size must be within cap
+  - Telegram approval must be present if approvalRequired=true
+
+If any gate fails, returns a structured blocked result — never broadcasts.
+If wallet has zero funds, returns INSUFFICIENT_BALANCE safely.
+
+Use this to wire the execution pathway without risking live broadcast.`,
+      parameters: {
+        type: "object",
+        properties: {
+          intent_type: {
+            type: "string",
+            enum: ["ADD_LIQUIDITY", "REMOVE_LIQUIDITY", "CLAIM_FEES", "CLOSE_POSITION"],
+            description: "Type of action to execute"
+          },
+          pool_address: {
+            type: "string",
+            description: "Pool address for ADD_LIQUIDITY"
+          },
+          position_address: {
+            type: "string",
+            description: "Position address for REMOVE_LIQUIDITY, CLAIM_FEES, CLOSE_POSITION"
+          },
+          amount_sol: {
+            type: "number",
+            description: "SOL amount for ADD_LIQUIDITY"
+          },
+          approval_token: {
+            type: "string",
+            description: "Telegram approval token (required when approvalRequired=true in config)"
+          }
+        },
+        required: ["intent_type"]
+      }
+    }
+  },
 ];
 
 export const tools = toolDefinitions.map((tool) => ({

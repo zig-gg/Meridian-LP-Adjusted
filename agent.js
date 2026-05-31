@@ -5,7 +5,7 @@ import { executeTool } from "./tools/executor.js";
 import { tools } from "./tools/definitions.js";
 
 const MANAGER_TOOLS  = new Set(["close_position", "claim_fees", "swap_token", "get_position_pnl", "get_my_positions", "get_wallet_balance"]);
-const SCREENER_TOOLS = new Set(["deploy_position", "get_active_bin", "get_top_candidates", "check_smart_wallets_on_pool", "get_token_holders", "get_token_narrative", "get_token_info", "search_pools", "get_pool_memory", "get_wallet_balance", "get_my_positions"]);
+const SCREENER_TOOLS = new Set(["deploy_position", "get_active_bin", "get_top_candidates", "scan_pools", "execute_intent", "check_smart_wallets_on_pool", "get_token_holders", "get_token_narrative", "get_token_info", "search_pools", "get_pool_memory", "get_wallet_balance", "get_my_positions"]);
 const GENERAL_INTENT_ONLY_TOOLS = new Set([
   "self_update",
   "update_config",
@@ -39,7 +39,7 @@ const INTENT_TOOLS = {
   balance:     new Set(["get_wallet_balance", "get_my_positions", "get_wallet_positions"]),
   positions:   new Set(["get_my_positions", "get_position_pnl", "get_wallet_balance", "set_position_note", "get_wallet_positions"]),
   strategy:    new Set(["list_strategies", "get_strategy", "add_strategy", "update_strategy", "delete_strategy", "remove_strategy", "set_active_strategy"]),
-  screen:      new Set(["get_top_candidates", "get_token_holders", "get_token_narrative", "get_token_info", "search_pools", "check_smart_wallets_on_pool", "get_pool_detail", "get_my_positions", "discover_pools"]),
+  screen:      new Set(["get_top_candidates", "scan_pools", "execute_intent", "get_token_holders", "get_token_narrative", "get_token_info", "search_pools", "check_smart_wallets_on_pool", "get_pool_detail", "get_my_positions", "discover_pools"]),
   memory:      new Set(["get_pool_memory", "add_pool_note", "list_blacklist", "add_to_blacklist", "remove_from_blacklist"]),
   smartwallet: new Set(["add_smart_wallet", "remove_smart_wallet", "list_smart_wallets", "check_smart_wallets_on_pool"]),
   study:       new Set(["study_top_lpers", "get_top_lpers", "get_pool_detail", "search_pools", "get_token_info", "discover_pools", "add_smart_wallet", "list_smart_wallets"]),
@@ -91,15 +91,58 @@ import { getStateSummary } from "./state.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getDecisionSummary } from "./decision-log.js";
 
-// Supports OpenRouter (default) or any OpenAI-compatible local server (e.g. LM Studio)
-// To use LM Studio: set LLM_BASE_URL=http://localhost:1234/v1 and LLM_API_KEY=lm-studio in .env
+// ─── LLM client configuration ─────────────────────────────────
+//
+// Priority order (first non-empty value wins):
+//   API key:  OPENROUTER_API_KEY || OPENAI_API_KEY || LLM_API_KEY
+//   Base URL: OPENROUTER_BASE_URL || OPENAI_BASE_URL || LLM_BASE_URL || https://openrouter.ai/api/v1
+//   Model:    OPENROUTER_MODEL || OPENAI_MODEL || LLM_MODEL || config model || fallback default
+//
+// If no API key is present and DRY_RUN=true or EXECUTION_MODE=scanner, the client
+// is created with a placeholder key so imports don't crash. The actual LLM call
+// will fail with a clear error message if attempted without a real key.
+
+const _llmApiKey =
+  process.env.OPENROUTER_API_KEY ||
+  process.env.OPENAI_API_KEY ||
+  process.env.LLM_API_KEY ||
+  null;
+
+const _llmBaseUrl =
+  process.env.OPENROUTER_BASE_URL ||
+  process.env.OPENAI_BASE_URL ||
+  process.env.LLM_BASE_URL ||
+  "https://openrouter.ai/api/v1";
+
+// Warn at startup if no key is configured (but don't crash — scanner/dry-run modes don't need it)
+if (!_llmApiKey) {
+  const isDryRun = process.env.DRY_RUN === "true";
+  const isScannerMode = (process.env.EXECUTION_MODE || "scanner") === "scanner";
+  if (!isDryRun && !isScannerMode) {
+    // Only log at import time if we're likely to actually call the LLM
+    log("warn", "No LLM API key found (OPENROUTER_API_KEY / OPENAI_API_KEY / LLM_API_KEY). LLM calls will fail.");
+  }
+}
+
 const client = new OpenAI({
-  baseURL: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
-  apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY,
+  baseURL: _llmBaseUrl,
+  // Use a placeholder when no key is set so the OpenAI constructor doesn't throw.
+  // Actual calls will fail with a 401 / clear error — not a silent crash at import.
+  apiKey: _llmApiKey || "no-key-set",
+  defaultHeaders: {
+    "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://github.com/zig-gg/Meridian-LP",
+    "X-Title": process.env.OPENROUTER_APP_NAME || "Meridian-LP",
+  },
   timeout: 5 * 60 * 1000,
 });
 
-const DEFAULT_MODEL = process.env.LLM_MODEL || "openrouter/healer-alpha";
+// Model priority: OPENROUTER_MODEL || OPENAI_MODEL || LLM_MODEL || config model || hardcoded fallback
+const DEFAULT_MODEL =
+  process.env.OPENROUTER_MODEL ||
+  process.env.OPENAI_MODEL ||
+  process.env.LLM_MODEL ||
+  config.llm?.screeningModel ||
+  "deepseek/deepseek-v4-pro";
 
 const MUTATING_TOOL_INTENTS = /\b(deploy|open position|add liquidity|lp into|invest in|close|exit|withdraw|remove liquidity|claim|harvest|collect|swap|convert|sell|exchange|block|unblock|blacklist|add smart wallet|remove smart wallet|add wallet|remove wallet|pin|unpin|clear lesson|add lesson|set active strategy|remove strategy|add strategy|set |change |update |self.?update|pull latest|git pull|update yourself)\b/i;
 const LIVE_DATA_TOOL_INTENTS = /\b(balance|wallet|position|portfolio|pnl|yield|range|show positions|open positions|screen|candidate|find pool|search|research|analyze|check pool|token holders|narrative|study top|top lpers?|lp behavior|who.?s lping|performance|history|stats|report|list smart wallets|list blacklist|list blocked deployers|list lessons)\b/i;
@@ -180,7 +223,6 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
   let sawToolCall = false;
   let noToolRetryCount = 0;
 
-  let emptyStreak = 0;
   for (let step = 0; step < maxSteps; step++) {
     log("agent", `Step ${step + 1}/${maxSteps}`);
 

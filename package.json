@@ -15,6 +15,7 @@
     "pm2:restart": "pm2 restart meridian --update-env",
     "pm2:logs": "pm2 logs meridian --lines 100",
     "dev": "cross-env DRY_RUN=true node index.js",
+    "daemon": "cross-env DRY_RUN=true EXECUTION_MODE=scanner HEADLESS=true node index.js",
     "test": "npm run test:syntax",
     "test:syntax": "node scripts/check-syntax.js",
     "test:screen": "node test/test-screening.js",

@@ -40,9 +40,17 @@ const isMain = entrypointPath
   ? path.resolve(entrypointPath) === fileURLToPath(import.meta.url)
   : false;
 
+const isHeadless = (() => {
+  if (process.env.HEADLESS === "true") return true;
+  if (process.env.INTERACTIVE === "false") return true;
+  return false;
+})();
+  
 if (isMain) {
   log("startup", "DLMM LP Agent starting...");
   log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
+  log("startup", `Execution: ${process.env.EXECUTION_MODE || "scanner"}`);
+  log("startup", `Headless: ${isHeadless ? "yes (daemon mode)" : "no (interactive)"}`);
   log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
   ensureAgentId();
   bootstrapHiveMind().catch((error) => log("hivemind_warn", `Bootstrap failed: ${error.message}`));
@@ -936,9 +944,21 @@ function getDeterministicCloseRule(position, managementConfig) {
 }
 
 // ═══════════════════════════════════════════
+//  HEADLESS / INTERACTIVE MODE
+// ═══════════════════════════════════════════
+//
+// HEADLESS=true  or  INTERACTIVE=false  → headless daemon mode:
+//   - No readline REPL, no keyboard commands
+//   - stdin close does NOT trigger shutdown (safe under PM2)
+//   - Cron cycles and Telegram polling start immediately
+//   - All safety gates and DRY_RUN behaviour unchanged
+//
+// Default (no env vars set): interactive when stdin is a TTY, headless otherwise.
+//
+// ═══════════════════════════════════════════
 //  INTERACTIVE REPL
 // ═══════════════════════════════════════════
-const isTTY = process.stdin.isTTY;
+const isTTY = process.stdin.isTTY && !isHeadless;
 let cronStarted = false;
 let busy = false;
 const _telegramQueue = []; // queued messages received while agent was busy
@@ -2001,8 +2021,12 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
   rl.on("close", () => shutdown("stdin closed"));
 
 } else if (isMain) {
-  // Non-TTY: start immediately
-  log("startup", "Non-TTY mode — starting cron cycles immediately.");
+  // Non-TTY or headless daemon mode: start cron cycles immediately, no REPL.
+  if (isHeadless) {
+    log("startup", "Headless daemon mode — cron cycles starting. No interactive REPL.");
+  } else {
+    log("startup", "Non-TTY mode — starting cron cycles immediately.");
+  }
   startCronJobs();
   maybeRunMissedBriefing().catch(() => { });
   startPolling(telegramHandler);

@@ -34,6 +34,7 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
+import { runConfigDoctor } from "./scripts/config-doctor.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
 const isMain = entrypointPath
@@ -52,6 +53,29 @@ if (isMain) {
   log("startup", `Execution: ${process.env.EXECUTION_MODE || "scanner"}`);
   log("startup", `Headless: ${isHeadless ? "yes (daemon mode)" : "no (interactive)"}`);
   log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
+
+  // ── Config Doctor ─────────────────────────────────────────────
+  // Runs before any cron cycle. Errors are always logged; in scanner/dry-run mode
+  // they produce a clear log but do NOT stop the process. In live mode they abort.
+  (() => {
+    try {
+      const doctorResult = runConfigDoctor({ env: process.env, runtimeConfig: config });
+      if (doctorResult.summary) log("config_doctor", "\n" + doctorResult.summary);
+      if (!doctorResult.valid) {
+        const isLiveMode = (process.env.EXECUTION_MODE || config?.execution?.mode || "scanner") === "live";
+        if (isLiveMode) {
+          log("config_doctor", "Hard config errors detected in live mode — refusing to start.");
+          process.exit(1);
+        } else {
+          log("config_doctor", "Hard config errors detected — review above before running in live mode.");
+        }
+      }
+    } catch (err) {
+      // Doctor itself must never crash the agent
+      log("config_doctor_warn", `Config Doctor threw unexpectedly: ${err.message}`);
+    }
+  })();
+
   ensureAgentId();
   bootstrapHiveMind().catch((error) => log("hivemind_warn", `Bootstrap failed: ${error.message}`));
   startHiveMindBackgroundSync();

@@ -644,6 +644,10 @@ test("index.js passes node --check", () => {
   execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+test("scripts/config-doctor.js passes node --check", () => {
+  execSync("node --check scripts/config-doctor.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 // ─── Summary ──────────────────────────────────────────────────
 restoreEnv();
 

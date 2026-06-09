@@ -19,6 +19,7 @@
 import assert from "assert";
 import { execSync } from "child_process";
 import { readFileSync } from "fs";
+import { createRequire } from "module";
 
 // ─── Test helpers ─────────────────────────────────────────────
 let passed = 0;
@@ -646,6 +647,20 @@ test("daemon npm script sets HEADLESS=true and DRY_RUN=true", () => {
   assert.ok(daemonScript.includes("node index.js"),        "daemon script must run node index.js");
 });
 
+test("ecosystem.config.cjs forces scanner/dry-run safety env", () => {
+  // createRequire lets an ES module load a CJS file synchronously.
+  // The ecosystem file exports a plain object with no side effects.
+  const require = createRequire(import.meta.url);
+  const ecosystem = require("../ecosystem.config.cjs");
+  const app = ecosystem.apps?.[0];
+  assert.ok(app, "ecosystem.config.cjs must export at least one app");
+  const env = app.env ?? {};
+  assert.strictEqual(env.DRY_RUN,              "true",    "ecosystem env must set DRY_RUN=true");
+  assert.strictEqual(env.EXECUTION_MODE,       "scanner", "ecosystem env must set EXECUTION_MODE=scanner");
+  assert.strictEqual(env.HEADLESS,             "true",    "ecosystem env must set HEADLESS=true");
+  assert.strictEqual(env.ALLOW_LIVE_EXECUTION, "false",   "ecosystem env must set ALLOW_LIVE_EXECUTION=false");
+});
+
 // ── Group 9: Syntax checks ────────────────────────────────────
 console.log("\nGroup 9: Files pass syntax check\n");
 test("execution-modes.js passes node --check", () => {
@@ -682,6 +697,10 @@ test("index.js passes node --check", () => {
 
 test("scripts/config-doctor.js passes node --check", () => {
   execSync("node --check scripts/config-doctor.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
+test("ecosystem.config.cjs passes node --check", () => {
+  execSync("node --check ecosystem.config.cjs", { cwd: process.cwd(), stdio: "pipe" });
 });
 
 // ─── Summary ──────────────────────────────────────────────────

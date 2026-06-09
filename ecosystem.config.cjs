@@ -14,6 +14,15 @@ module.exports = {
       min_uptime: "10s",
       env: {
         NODE_ENV: "production",
+        // ── Scanner/dry-run daemon safety defaults ─────────────────
+        // These mirror `npm run daemon` and ensure pm2:start is safe
+        // even without explicit env injection from the command line.
+        // ALLOW_LIVE_EXECUTION and DRY_RUN are belt-and-suspenders:
+        // live execution requires both to be overridden simultaneously.
+        DRY_RUN: "true",
+        EXECUTION_MODE: "scanner",
+        HEADLESS: "true",
+        ALLOW_LIVE_EXECUTION: "false",
       },
     },
   ],

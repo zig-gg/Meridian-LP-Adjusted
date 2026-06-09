@@ -180,9 +180,19 @@ test("checkLiveExecutionAllowed: allowed when all gates pass", () => {
 // ── Group 2: runExecutionGate tests ───────────────────────────
 console.log("\nGroup 2: runExecutionGate — all blocking conditions\n");
 
+// NOTE ON TEST ISOLATION:
+// runExecutionGate() reads config.risk.maxDeployAmount and config.management.gasReserve
+// from the live config object, which is loaded from production user-config.json.
+// To avoid gate-order failures across machines (e.g. AWS has maxDeployAmount=0.15),
+// all tests below use deployAmountSol=0.05 EXCEPT the explicit maxDeployAmount test,
+// which uses a value guaranteed to exceed any reasonable cap.
+// walletBalanceSol is chosen to be definitively above or below the required threshold
+// regardless of what gasReserve is configured (max plausible gasReserve is ~1.0 SOL).
+
 test("runExecutionGate: blocked by executionMode=scanner", () => {
   setEnv({ DRY_RUN: "false", ALLOW_LIVE_EXECUTION: "true", EXECUTION_MODE: "scanner", BOT_WALLET_PRIVATE_KEY: "fake" });
-  const result = runExecutionGate({ deployAmountSol: 0.5, walletBalanceSol: 10, approvalRequired: false, openPositions: 0 });
+  // deployAmountSol intentionally below any plausible maxDeployAmount so scanner gate fires first
+  const result = runExecutionGate({ deployAmountSol: 0.05, walletBalanceSol: 10, approvalRequired: false, openPositions: 0 });
   assert.strictEqual(result.pass, false);
   assert.strictEqual(result.gate, "executionMode");
   assert.strictEqual(result.blocked, true);
@@ -190,8 +200,10 @@ test("runExecutionGate: blocked by executionMode=scanner", () => {
 
 test("runExecutionGate: blocked by insufficient balance (zero wallet)", () => {
   setEnv({ DRY_RUN: "false", ALLOW_LIVE_EXECUTION: "true", EXECUTION_MODE: "live", BOT_WALLET_PRIVATE_KEY: "fake" });
+  // deployAmountSol=0.05 is below any plausible maxDeployAmount.
+  // walletBalanceSol=0.0 is always below deployAmountSol+gasReserve, so Gate 6 fires.
   const result = runExecutionGate({
-    deployAmountSol: 0.5,
+    deployAmountSol: 0.05,
     walletBalanceSol: 0.0,
     approvalRequired: false,
     openPositions: 0,
@@ -203,10 +215,12 @@ test("runExecutionGate: blocked by insufficient balance (zero wallet)", () => {
 
 test("runExecutionGate: blocked by insufficient balance (below gas reserve)", () => {
   setEnv({ DRY_RUN: "false", ALLOW_LIVE_EXECUTION: "true", EXECUTION_MODE: "live", BOT_WALLET_PRIVATE_KEY: "fake" });
-  // deployAmountSol=0.03, gasReserve=0.2 → need 0.23 SOL, have 0.05
+  // deployAmountSol=0.05 is below any plausible maxDeployAmount.
+  // walletBalanceSol=0.04 is below deployAmountSol alone, so always fails Gate 6
+  // regardless of what gasReserve is configured.
   const result = runExecutionGate({
-    deployAmountSol: 0.03,
-    walletBalanceSol: 0.05,
+    deployAmountSol: 0.05,
+    walletBalanceSol: 0.04,
     approvalRequired: false,
     openPositions: 0,
   });
@@ -216,8 +230,9 @@ test("runExecutionGate: blocked by insufficient balance (below gas reserve)", ()
 
 test("runExecutionGate: blocked by maxPositions", () => {
   setEnv({ DRY_RUN: "false", ALLOW_LIVE_EXECUTION: "true", EXECUTION_MODE: "live", BOT_WALLET_PRIVATE_KEY: "fake" });
+  // deployAmountSol=0.05 is below any plausible maxDeployAmount so Gate 4 fires first.
   const result = runExecutionGate({
-    deployAmountSol: 0.5,
+    deployAmountSol: 0.05,
     walletBalanceSol: 10.0,
     approvalRequired: false,
     openPositions: 999,
@@ -226,10 +241,28 @@ test("runExecutionGate: blocked by maxPositions", () => {
   assert.strictEqual(result.gate, "maxPositions");
 });
 
+test("runExecutionGate: blocked by maxDeployAmount", () => {
+  setEnv({ DRY_RUN: "false", ALLOW_LIVE_EXECUTION: "true", EXECUTION_MODE: "live", BOT_WALLET_PRIVATE_KEY: "fake" });
+  // Use a deploy amount that is guaranteed to exceed any plausible maxDeployAmount.
+  // Even the most permissive real config caps at maxDeployAmount=50 (default).
+  // AWS production has maxDeployAmount=0.15, so 100 SOL exceeds any real cap.
+  const result = runExecutionGate({
+    deployAmountSol: 100,
+    walletBalanceSol: 200.0,
+    approvalRequired: false,
+    openPositions: 0,
+  });
+  assert.strictEqual(result.pass, false);
+  assert.strictEqual(result.gate, "maxDeployAmount");
+});
+
 test("runExecutionGate: blocked by approval_required", () => {
   setEnv({ DRY_RUN: "false", ALLOW_LIVE_EXECUTION: "true", EXECUTION_MODE: "live", BOT_WALLET_PRIVATE_KEY: "fake" });
+  // deployAmountSol=0.05 is below any plausible maxDeployAmount.
+  // walletBalanceSol=10.0 is always above deployAmountSol+gasReserve (max realistic ~1 SOL),
+  // so Gate 6 passes and Gate 7 (approval) fires.
   const result = runExecutionGate({
-    deployAmountSol: 0.5,
+    deployAmountSol: 0.05,
     walletBalanceSol: 10.0,
     approvalRequired: true,
     approvalPresent: false,
@@ -241,8 +274,11 @@ test("runExecutionGate: blocked by approval_required", () => {
 
 test("runExecutionGate: passes when all conditions met", () => {
   setEnv({ DRY_RUN: "false", ALLOW_LIVE_EXECUTION: "true", EXECUTION_MODE: "live", BOT_WALLET_PRIVATE_KEY: "fake" });
+  // deployAmountSol=0.05 is below any plausible maxDeployAmount.
+  // walletBalanceSol=10.0 is always above deployAmountSol+gasReserve.
+  // openPositions=0 is below any plausible maxPositions.
   const result = runExecutionGate({
-    deployAmountSol: 0.5,
+    deployAmountSol: 0.05,
     walletBalanceSol: 10.0,
     approvalRequired: false,
     approvalPresent: false,

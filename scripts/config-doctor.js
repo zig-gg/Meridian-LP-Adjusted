@@ -100,7 +100,7 @@ const KNOWN_KEYS = new Set([
   "chartIndicators",
 
   // telegram
-  "telegramChatId",
+  "telegramChatId", "telegramMutationsEnabled",
 ]);
 
 // Keys that look like common typos of real keys.
@@ -261,6 +261,10 @@ export function runConfigDoctor({
     env.LLM_API_KEY ||
     userConfig.llmApiKey
   );
+
+  const telegramMutationsEnabled = runtimeConfig?.telegram?.mutationsEnabled
+    ?? booleanConfig(userConfig.telegramMutationsEnabled ?? env.TELEGRAM_MUTATIONS_ENABLED)
+    ?? false;
 
   const strategy = runtimeConfig?.strategy?.strategy ?? userConfig.strategy ?? "bid_ask";
 
@@ -434,7 +438,16 @@ export function runConfigDoctor({
     );
   }
 
-  // 15.2 Unknown keys in user-config.json (catches typos)
+  // 15.2 Telegram mutation commands enabled in scanner/dry-run mode
+  if (telegramMutationsEnabled && (effectiveExecutionMode === "scanner" || effectiveDryRun === true)) {
+    warnings.push(
+      `telegramMutationsEnabled=true while ${effectiveDryRun === true ? "DRY_RUN=true" : `executionMode="${effectiveExecutionMode}"`}. ` +
+      `Telegram mutation commands can still attempt side effects even when execution gates block live broadcast. ` +
+      `Keep telegramMutationsEnabled=false for read-only monitoring unless you intentionally need Telegram control.`
+    );
+  }
+
+  // 15.3 Unknown keys in user-config.json (catches typos)
   for (const key of Object.keys(userConfig)) {
     if (key.startsWith("_")) continue; // comment/annotation keys are intentional
     if (KNOWN_KEYS.has(key)) continue;
@@ -471,6 +484,7 @@ export function runConfigDoctor({
     `  minBinStep         : ${minBinStep}  maxBinStep: ${maxBinStep}`,
     `  mgmtIntervalMin    : ${mgmtInterval}  screenIntervalMin: ${screenInterval}  healthIntervalMin: ${healthInterval}`,
     `  LLM_ENABLED        : ${llmEnabled}`,
+    `  TELEGRAM_MUTATE   : ${telegramMutationsEnabled}`,
     `  hiveMindPullMode   : ${hiveMindPullMode}`,
     "───────────────────────────────────────────────────────",
   ];
@@ -515,6 +529,7 @@ export function runConfigDoctor({
       screenInterval,
       healthInterval,
       llmEnabled,
+      telegramMutationsEnabled,
       hiveMindPullMode,
     },
   };

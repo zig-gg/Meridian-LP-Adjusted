@@ -1356,30 +1356,85 @@ async function applySettingsMenuCallback(msg) {
   await showSettingsMenu({ messageId: msg.messageId, page });
 }
 
+
+function isTelegramMutationsEnabled() {
+  return config.telegram?.mutationsEnabled === true;
+}
+
+const TELEGRAM_READ_ONLY_BLOCK_MESSAGE =
+  "Blocked: Telegram is in read-only mode. " +
+  "Set telegramMutationsEnabled=true or TELEGRAM_MUTATIONS_ENABLED=true to allow mutating Telegram commands.";
+
+function isTelegramReadOnlyCommand(text) {
+  return (
+    text === "/help" ||
+    text === "/status" ||
+    text === "/wallet" ||
+    text === "/config" ||
+    text === "/positions" ||
+    text === "/screen" ||
+    text === "/candidates" ||
+    text === "/briefing" ||
+    /^\/pool\s+\d+$/i.test(text)
+  );
+}
+
+function isTelegramMutationCommand(text) {
+  return (
+    text === "/settings" ||
+    text === "/menu" ||
+    text === "/configmenu" ||
+    text === "/closeall" ||
+    text === "/pause" ||
+    text === "/resume" ||
+    text === "/stop" ||
+    /^cfg:/i.test(text) ||
+    /^\/close\s+\d+$/i.test(text) ||
+    /^\/set\s+\d+\s+.+$/i.test(text) ||
+    /^\/setcfg\s+[A-Za-z0-9_]+\s+.+$/i.test(text) ||
+    /^\/deploy\s+\d+$/i.test(text) ||
+    /^\/hive\b/i.test(text)
+  );
+}
+
+function getTelegramReadOnlyBlockMessage(text) {
+  if (isTelegramMutationsEnabled()) return null;
+  if (isTelegramReadOnlyCommand(text)) return null;
+  if (isTelegramMutationCommand(text)) return TELEGRAM_READ_ONLY_BLOCK_MESSAGE;
+  return TELEGRAM_READ_ONLY_BLOCK_MESSAGE;
+}
+
 function formatHelpText() {
+  const mutationStatus = isTelegramMutationsEnabled() ? "enabled" : "disabled (read-only mode)";
   return [
     "Telegram commands",
     "",
-    "/help — show commands",
-    "/status — wallet + positions snapshot",
-    "/wallet — wallet, deploy amount, HiveMind status",
-    "/positions — list open positions",
-    "/pool <n> — detailed info for one open position",
-    "/close <n> — close one position by index",
-    "/closeall — close all open positions",
-    "/set <n> <note> — set note/instruction on position",
-    "/config — show important runtime config",
-    "/settings — button menu for common config",
-    "/setcfg <key> <value> — update persisted config",
-    "/screen — refresh deterministic candidate list",
-    "/candidates — show latest cached candidates",
-    "/deploy <n> — deploy candidate by cached index",
-    "/briefing — morning briefing",
-    "/hive — HiveMind sync status",
-    "/hive pull — manual HiveMind pull now",
-    "/pause — stop cron cycles",
-    "/resume — start cron cycles again",
-    "/stop — shut down agent",
+    "Read-only commands:",
+    "/help - show commands",
+    "/status - wallet + positions snapshot",
+    "/wallet - wallet, deploy amount, HiveMind status",
+    "/positions - list open positions",
+    "/pool <n> - detailed info for one open position",
+    "/config - show important runtime config",
+    "/screen - refresh deterministic candidate list",
+    "/candidates - show latest cached candidates",
+    "/briefing - morning briefing (requires LLM enabled; otherwise returns disabled notice)",
+    "",
+    `Mutation commands: ${mutationStatus}`,
+    "/settings - button menu for common config",
+    "/setcfg <key> <value> - update persisted config",
+    "/set <n> <note> - set note/instruction on position",
+    "/deploy <n> - deploy candidate by cached index",
+    "/close <n> - close one position by index",
+    "/closeall - close all open positions",
+    "/hive / /hive pull - HiveMind status or pull",
+    "/pause - stop cron cycles",
+    "/resume - start cron cycles again",
+    "/stop - shut down agent",
+    "",
+    isTelegramMutationsEnabled()
+      ? "Mutation commands are enabled."
+      : "Mutation commands are blocked by default. Set telegramMutationsEnabled=true or TELEGRAM_MUTATIONS_ENABLED=true to enable them.",
   ].join("\n");
 }
 
@@ -1482,6 +1537,16 @@ async function drainTelegramQueue() {
 async function telegramHandler(msg) {
   const text = msg?.text?.trim();
   if (!text) return;
+
+  const readOnlyBlock = getTelegramReadOnlyBlockMessage(text);
+  if (readOnlyBlock) {
+    if (msg?.callbackQueryId) {
+      await answerCallbackQuery(msg.callbackQueryId, "Read-only mode").catch(() => {});
+    }
+    await sendMessage(readOnlyBlock).catch(() => {});
+    return;
+  }
+
   if (msg?.isCallback && text.startsWith("cfg:")) {
     try {
       await applySettingsMenuCallback(msg);
@@ -1552,7 +1617,10 @@ async function telegramHandler(msg) {
         const oor = !p.in_range ? " ⚠️OOR" : "";
         return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
       });
-      await sendMessage(`📊 Open Positions (${total_positions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`);
+      const footer = isTelegramMutationsEnabled()
+        ? "/close <n> to close | /set <n> <note> to set instruction"
+        : "Telegram mutation commands are disabled in read-only mode.";
+      await sendMessage(`Open Positions (${total_positions}):\n\n${lines.join("\n")}\n\n${footer}`);
     } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
     return;
   }

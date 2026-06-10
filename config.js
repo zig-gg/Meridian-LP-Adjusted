@@ -182,6 +182,13 @@ export const config = {
     pullMode: u.hiveMindPullMode ?? "auto",
   },
 
+  telegram: {
+    // Default to read-only Telegram operation.
+    // Explicit opt-in is required before Telegram can mutate config,
+    // pause/resume cron cycles, pull HiveMind, deploy, close, or route free-text agent actions.
+    mutationsEnabled: booleanConfig(u.telegramMutationsEnabled ?? process.env.TELEGRAM_MUTATIONS_ENABLED) ?? false,
+  },
+
   api: {
     url: nonEmptyString(u.agentMeridianApiUrl, process.env.AGENT_MERIDIAN_API_URL, DEFAULT_AGENT_MERIDIAN_API_URL),
     publicApiKey: nonEmptyString(u.publicApiKey, process.env.PUBLIC_API_KEY, DEFAULT_AGENT_MERIDIAN_PUBLIC_KEY),

@@ -716,6 +716,83 @@ test("ecosystem.config.cjs passes node --check", () => {
 });
 
 // ─── Summary ──────────────────────────────────────────────────
+
+// Group 10: Telegram read-only safety
+console.log("\nGroup 10: Telegram read-only safety\n");
+
+function getTelegramHandlerSlice(content) {
+  const start = content.indexOf("async function telegramHandler");
+  assert.ok(start >= 0, "index.js must define telegramHandler");
+  const end = content.indexOf("function launchCron", start);
+  assert.ok(end > start, "index.js must have a stable end marker after telegramHandler");
+  return content.slice(start, end);
+}
+
+test("index.js defines Telegram mutation read-only guard", () => {
+  const content = readFileSync("index.js", "utf8");
+  const handler = getTelegramHandlerSlice(content);
+  assert.ok(content.includes("telegramMutationsEnabled"), "index.js must reference telegramMutationsEnabled");
+  assert.ok(content.includes("getTelegramReadOnlyBlockMessage"), "index.js must define a Telegram read-only guard");
+  assert.ok(content.includes("TELEGRAM_READ_ONLY_BLOCK_MESSAGE"), "index.js must define a clear block message");
+  assert.ok(handler.includes("const readOnlyBlock = getTelegramReadOnlyBlockMessage(text)"), "telegramHandler must call the read-only guard");
+});
+
+test("Telegram read-only guard runs before /deploy handler", () => {
+  const content = readFileSync("index.js", "utf8");
+  const handler = getTelegramHandlerSlice(content);
+  const guard = handler.indexOf("const readOnlyBlock = getTelegramReadOnlyBlockMessage(text)");
+  assert.ok(guard >= 0, "Telegram read-only guard must exist inside telegramHandler");
+  assert.ok(
+    guard < handler.indexOf("const deployMatch"),
+    "Telegram read-only guard must run before /deploy parsing"
+  );
+  assert.ok(
+    guard < handler.indexOf("deployLatestCandidate"),
+    "Telegram read-only guard must run before deployLatestCandidate() inside telegramHandler"
+  );
+});
+
+test("Telegram read-only guard runs before /close handler", () => {
+  const content = readFileSync("index.js", "utf8");
+  const handler = getTelegramHandlerSlice(content);
+  const guard = handler.indexOf("const readOnlyBlock = getTelegramReadOnlyBlockMessage(text)");
+  assert.ok(guard >= 0, "Telegram read-only guard must exist inside telegramHandler");
+  assert.ok(
+    guard < handler.indexOf("const closeMatch"),
+    "Telegram read-only guard must run before /close parsing"
+  );
+  assert.ok(
+    guard < handler.indexOf("closePosition({"),
+    "Telegram read-only guard must run before closePosition() inside telegramHandler"
+  );
+});
+
+test("Telegram read-only guard runs before /setcfg update_config handler", () => {
+  const content = readFileSync("index.js", "utf8");
+  const handler = getTelegramHandlerSlice(content);
+  const guard = handler.indexOf("const readOnlyBlock = getTelegramReadOnlyBlockMessage(text)");
+  assert.ok(guard >= 0, "Telegram read-only guard must exist inside telegramHandler");
+  assert.ok(
+    guard < handler.indexOf("const setCfgMatch"),
+    "Telegram read-only guard must run before /setcfg parsing"
+  );
+  assert.ok(
+    guard < handler.indexOf('executeTool("update_config"'),
+    "Telegram read-only guard must run before update_config tool call inside telegramHandler"
+  );
+});
+
+test("Telegram read-only guard runs before fallback free-text agentLoop", () => {
+  const content = readFileSync("index.js", "utf8");
+  const handler = getTelegramHandlerSlice(content);
+  const guard = handler.indexOf("const readOnlyBlock = getTelegramReadOnlyBlockMessage(text)");
+  assert.ok(guard >= 0, "Telegram read-only guard must exist inside telegramHandler");
+  assert.ok(
+    guard < handler.indexOf("agentLoop(text"),
+    "Telegram read-only guard must run before fallback free-text agentLoop inside telegramHandler"
+  );
+});
+
 restoreEnv();
 
 console.log(`\n${"─".repeat(50)}`);

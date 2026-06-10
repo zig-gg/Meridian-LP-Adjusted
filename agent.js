@@ -144,6 +144,18 @@ const DEFAULT_MODEL =
   config.llm?.screeningModel ||
   "deepseek/deepseek-v4-pro";
 
+export function isLlmEnabled() {
+  return config.llm?.enabled === true;
+}
+
+export function getLlmDisabledMessage(agentType = "GENERAL") {
+  return [
+    `LLM is disabled for ${agentType}.`,
+    `Set llmEnabled=true in user-config.json or LLM_ENABLED=true in the environment to enable model calls.`,
+    `No OpenRouter/OpenAI/LLM API request was made.`,
+  ].join(" ");
+}
+
 const MUTATING_TOOL_INTENTS = /\b(deploy|open position|add liquidity|lp into|invest in|close|exit|withdraw|remove liquidity|claim|harvest|collect|swap|convert|sell|exchange|block|unblock|blacklist|add smart wallet|remove smart wallet|add wallet|remove wallet|pin|unpin|clear lesson|add lesson|set active strategy|remove strategy|add strategy|set |change |update |self.?update|pull latest|git pull|update yourself)\b/i;
 const LIVE_DATA_TOOL_INTENTS = /\b(balance|wallet|position|portfolio|pnl|yield|range|show positions|open positions|screen|candidate|find pool|search|research|analyze|check pool|token holders|narrative|study top|top lpers?|lp behavior|who.?s lping|performance|history|stats|report|list smart wallets|list blacklist|list blocked deployers|list lessons)\b/i;
 const CONFIG_READ_ONLY_INTENTS = /\b(check|show|what(?:'s| is)?|review|inspect|see)\b.*\b(config|settings?|thresholds?)\b/i;
@@ -192,8 +204,18 @@ function isToolChoiceRequiredError(error) {
  * @param {number} maxSteps - Safety limit on iterations (default 20)
  * @returns {string} - The agent's final text response
  */
+
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = [], agentType = "GENERAL", model = null, maxOutputTokens = null, options = {}) {
   const { interactive = false, onToolStart = null, onToolFinish = null } = options;
+
+  if (!isLlmEnabled()) {
+    const message =
+      "LLM is disabled. No model/provider call was made. " +
+      "Set llmEnabled=true in user-config.json or LLM_ENABLED=true in the environment to enable LLM calls.";
+    log("agent", message);
+    return { content: message };
+  }
+
   // Build dynamic system prompt with current portfolio state
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
   const stateSummary = getStateSummary();

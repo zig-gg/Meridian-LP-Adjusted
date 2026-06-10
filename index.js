@@ -3,7 +3,7 @@ import cron from "node-cron";
 import readline from "readline";
 import path from "path";
 import { fileURLToPath } from "url";
-import { agentLoop } from "./agent.js";
+import { agentLoop, isLlmEnabled, getLlmDisabledMessage } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
@@ -147,6 +147,32 @@ function shouldUsePnlRecheck() {
   return !config.api.lpAgentRelayEnabled;
 }
 
+function buildNoLlmScannerReport(passing, filteredOut = []) {
+  const top = passing.slice(0, 3).map(({ pool }) => {
+    const name = pool?.name || "unknown";
+    const address = pool?.pool || "unknown";
+    const tvl = pool?.tvl ?? pool?.active_tvl ?? "?";
+    const volume = pool?.volume_window ?? "?";
+    const feeTvl = pool?.fee_active_tvl_ratio ?? "?";
+    return `- ${name} (${address}) | TVL=${tvl} | volume=${volume} | fee/TVL=${feeTvl}`;
+  });
+
+  const rejected = filteredOut.slice(0, 3).map((entry) => `- ${entry.name}: ${entry.reason}`);
+
+  return [
+    "⛔ NO DEPLOY",
+    "",
+    "Cycle finished without LLM evaluation.",
+    "",
+    "WHY SKIPPED",
+    "LLM is disabled, so scanner mode did not ask a model to choose or deploy a pool.",
+    "",
+    "TOP DETERMINISTIC CANDIDATES",
+    top.length ? top.join("\n") : "- none",
+    rejected.length ? "\nFILTERED EXAMPLES\n" + rejected.join("\n") : null,
+  ].filter(Boolean).join("\n");
+}
+
 function schedulePeakConfirmation(positionAddress) {
   if (!positionAddress || _peakConfirmTimers.has(positionAddress)) return;
 
@@ -191,6 +217,11 @@ function scheduleTrailingDropConfirmation(positionAddress) {
 }
 
 async function runBriefing() {
+  if (!isLlmEnabled()) {
+    log("cron", "Morning briefing skipped — LLM disabled");
+    return;
+  }
+
   log("cron", "Starting morning briefing");
   try {
     const briefing = await generateBriefing();
@@ -343,21 +374,25 @@ export async function runManagementCycle({ silent = false } = {}) {
     });
 
     if (actionPositions.length > 0) {
-      log("cron", `Management: ${actionPositions.length} action(s) needed — invoking LLM [model: ${config.llm.managementModel}]`);
+      if (!isLlmEnabled()) {
+        log("cron", `Management: ${actionPositions.length} action(s) needed, but LLM is disabled — skipping model execution`);
+        mgmtReport += `\n\n${getLlmDisabledMessage("MANAGER")}`;
+      } else {
+        log("cron", `Management: ${actionPositions.length} action(s) needed — invoking LLM [model: ${config.llm.managementModel}]`);
 
-      const actionBlocks = actionPositions.map((p) => {
-        const act = actionMap.get(p.position);
-        return [
-          `POSITION: ${p.pair} (${p.position})`,
-          `  pool: ${p.pool}`,
-          `  action: ${act.action}${act.rule && act.rule !== "exit" ? ` — Rule ${act.rule}: ${act.reason}` : ""}${act.rule === "exit" ? ` — ⚡ Trailing TP: ${act.reason}` : ""}`,
-          `  pnl_pct: ${p.pnl_pct}% | unclaimed_fees: ${cur}${p.unclaimed_fees_usd} | value: ${cur}${p.total_value_usd} | fee_per_tvl_24h: ${p.fee_per_tvl_24h ?? "?"}%`,
-          `  bins: lower=${p.lower_bin} upper=${p.upper_bin} active=${p.active_bin} | oor_minutes: ${p.minutes_out_of_range ?? 0}`,
-          p.instruction ? `  instruction: "${p.instruction}"` : null,
-        ].filter(Boolean).join("\n");
-      }).join("\n\n");
+        const actionBlocks = actionPositions.map((p) => {
+          const act = actionMap.get(p.position);
+          return [
+            `POSITION: ${p.pair} (${p.position})`,
+            `  pool: ${p.pool}`,
+            `  action: ${act.action}${act.rule && act.rule !== "exit" ? ` — Rule ${act.rule}: ${act.reason}` : ""}${act.rule === "exit" ? ` — ⚡ Trailing TP: ${act.reason}` : ""}`,
+            `  pnl_pct: ${p.pnl_pct}% | unclaimed_fees: ${cur}${p.unclaimed_fees_usd} | value: ${cur}${p.total_value_usd} | fee_per_tvl_24h: ${p.fee_per_tvl_24h ?? "?"}%`,
+            `  bins: lower=${p.lower_bin} upper=${p.upper_bin} active=${p.active_bin} | oor_minutes: ${p.minutes_out_of_range ?? 0}`,
+            p.instruction ? `  instruction: "${p.instruction}"` : null,
+          ].filter(Boolean).join("\n");
+        }).join("\n\n");
 
-      const { content } = await agentLoop(`
+        const { content } = await agentLoop(`
 MANAGEMENT ACTION REQUIRED — ${actionPositions.length} position(s)
 
 ${actionBlocks}
@@ -371,14 +406,15 @@ RULES:
 Execute the required actions. Do NOT re-evaluate CLOSE/CLAIM — rules already applied. Just execute.
 After executing, write a brief one-line result per position.
       `, config.llm.maxSteps, [], "MANAGER", config.llm.managementModel, 2048, {
-        onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
-        onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
-      });
+          onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
+          onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
+        });
 
-      mgmtReport += `\n\n${content}`;
+        mgmtReport += `\n\n${content}`;
+      }
     } else {
-      log("cron", "Management: all positions STAY — skipping LLM");
-      await liveMessage?.note("No tool actions needed.");
+      mgmtReport += "\n\nNo actions needed.";
+      log("cron", "Management: no actions needed — LLM not invoked");
     }
 
     // Trigger screening after management
@@ -640,6 +676,21 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
     const weightsSummary = config.darwin?.enabled ? getWeightsSummary() : null;
 
+    if (!isLlmEnabled()) {
+      log("cron", "Screening cycle skipped LLM evaluation — LLM disabled");
+      screenReport = buildNoLlmScannerReport(
+        passing,
+        filteredOut.length ? filteredOut : earlyFilteredExamples
+      );
+      appendDecision({
+        type: "no_deploy",
+        actor: "SCREENER",
+        summary: "LLM disabled",
+        reason: "Scanner collected deterministic candidates but skipped model evaluation because LLM is disabled.",
+      });
+      return screenReport;
+    }
+
     let deployAttempted = false;
     let deploySucceeded = false;
     const { content } = await agentLoop(`
@@ -770,6 +821,10 @@ export function startCronJobs() {
 
   const healthTask = cron.schedule(`0 * * * *`, async () => {
     if (_managementBusy) return;
+    if (!isLlmEnabled()) {
+      log("cron", "Health check skipped — LLM disabled");
+      return;
+    }
     _managementBusy = true;
     log("cron", "Starting health check");
     try {
@@ -1450,6 +1505,10 @@ async function telegramHandler(msg) {
   }
 
   if (text === "/briefing") {
+    if (!isLlmEnabled()) {
+      await sendMessage(getLlmDisabledMessage("BRIEFING")).catch(() => {});
+      return;
+    }
     try {
       const briefing = await generateBriefing();
       await sendHTML(briefing);
@@ -1916,6 +1975,10 @@ Commands:
 
     if (input === "/briefing") {
       await runBusy(async () => {
+        if (!isLlmEnabled()) {
+          console.log(`\n${getLlmDisabledMessage("BRIEFING")}\n`);
+          return;
+        }
         const briefing = await generateBriefing();
         console.log(`\n${briefing.replace(/<[^>]*>/g, "")}\n`);
       });

@@ -13,6 +13,7 @@
   "llmApiKey": "",
   "llmModel": "minimax/minimax-m2.7",
   "dryRun": true,
+  "llmEnabled": false,
 
   "deployAmountSol": 0.5,
   "maxPositions": 3,

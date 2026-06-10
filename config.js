@@ -19,6 +19,12 @@ function numericConfig(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function booleanConfig(value) {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return null;
+}
+
 const legacyBinsBelow = numericConfig(u.binsBelow);
 const configuredMinBinsBelow = numericConfig(u.minBinsBelow) ?? MIN_SAFE_BINS_BELOW;
 const configuredMaxBinsBelow = numericConfig(u.maxBinsBelow)
@@ -138,6 +144,9 @@ export const config = {
 
   // ─── LLM Settings ──────────────────────
   llm: {
+    // Emergency Phase 1E.5: disabled by default to prevent scanner/dry-run
+    // daemons from spending API credits. Explicit opt-in only.
+    enabled: booleanConfig(u.llmEnabled ?? process.env.LLM_ENABLED) ?? false,
     temperature: u.temperature ?? 0.373,
     maxTokens:   u.maxTokens   ?? 4096,
     maxSteps:    u.maxSteps    ?? 20,

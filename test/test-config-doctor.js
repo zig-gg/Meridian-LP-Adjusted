@@ -42,6 +42,7 @@ const CLEAN_ENV = {
 };
 
 const CLEAN_CONFIG = {
+  llmEnabled:       false,
   deployAmountSol:  0.1,
   maxDeployAmount:  50,
   gasReserve:       0.05,
@@ -101,6 +102,7 @@ test("effective values reflect mocked env + config", () => {
   assert.strictEqual(r.effective.gasReserve,       0.05);
   assert.strictEqual(r.effective.maxDeployAmount,  50);
   assert.strictEqual(r.effective.minSolToOpen,     0.18);
+  assert.strictEqual(r.effective.llmEnabled, false);
   assert.strictEqual(r.effective.hiveMindPullMode, "manual");
 });
 
@@ -110,6 +112,7 @@ test("summary string contains key config values", () => {
   assert.ok(r.summary.includes("deployAmountSol"), "summary must mention deployAmountSol");
   assert.ok(r.summary.includes("0.1"), "summary must mention deployAmountSol value");
   assert.ok(r.summary.includes("gasReserve"), "summary must mention gasReserve");
+  assert.ok(r.summary.includes("LLM_ENABLED"), "summary must mention LLM enabled/disabled state");
 });
 
 // ── Group 2: Fail conditions ──────────────────────────────────
@@ -258,6 +261,24 @@ test("HEADLESS=true without DRY_RUN=true produces warning", () => {
   assert.strictEqual(r.valid, true);
 });
 
+test("LLM disabled is clean when no LLM keys are configured", () => {
+  const r = doctor({}, { llmEnabled: false });
+  assert.strictEqual(r.effective.llmEnabled, false);
+  assert.ok(!r.warnings.some(w => w.includes("LLM is disabled")));
+});
+
+test("LLM key present while disabled produces warning", () => {
+  const r = doctor({ OPENROUTER_API_KEY: "fake_key_for_test" }, { llmEnabled: false });
+  assert.ok(r.warnings.some(w => w.includes("LLM is disabled")));
+  assert.strictEqual(r.valid, true);
+});
+
+test("LLM enabled suppresses disabled-key warning", () => {
+  const r = doctor({ OPENROUTER_API_KEY: "fake_key_for_test" }, { llmEnabled: true });
+  assert.ok(!r.warnings.some(w => w.includes("LLM is disabled")));
+  assert.strictEqual(r.effective.llmEnabled, true);
+});
+
 test("hiveMindPullMode=auto in headless mode produces warning", () => {
   const r = doctor({}, { hiveMindPullMode: "auto" });
   // CLEAN_ENV has HEADLESS=true
@@ -282,6 +303,11 @@ test("hiveMindPullMode=manual suppresses the auto-pull warning", () => {
 
 // ── Group 4: Unknown key / typo detection ────────────────────
 console.log("\nGroup 4: Unknown keys and typo detection\n");
+
+test("llmEnable typo produces warning", () => {
+  const r = doctor({}, { llmEnable: true });
+  assert.ok(r.warnings.some(w => w.includes("llmEnable") && w.includes("llmEnabled")));
+});
 
 test("maxBundlersPct (typo of maxBundlePct) produces warning", () => {
   const r = doctor({}, { maxBundlersPct: 30 });

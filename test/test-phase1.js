@@ -641,6 +641,7 @@ test("SIGINT still shuts down cleanly in headless mode", () => {
 test("daemon npm script sets HEADLESS=true and DRY_RUN=true", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
   const daemonScript = pkg.scripts?.daemon ?? "";
+  assert.ok(daemonScript.includes("LLM_ENABLED=false"), "daemon script must disable LLM calls by default");
   assert.ok(daemonScript.includes("HEADLESS=true"),        "daemon script must set HEADLESS=true");
   assert.ok(daemonScript.includes("DRY_RUN=true"),         "daemon script must set DRY_RUN=true");
   assert.ok(daemonScript.includes("EXECUTION_MODE=scanner"), "daemon script must set EXECUTION_MODE=scanner");
@@ -655,6 +656,7 @@ test("ecosystem.config.cjs forces scanner/dry-run safety env", () => {
   const app = ecosystem.apps?.[0];
   assert.ok(app, "ecosystem.config.cjs must export at least one app");
   const env = app.env ?? {};
+  assert.strictEqual(app.env?.LLM_ENABLED, "false", "PM2 ecosystem config must disable LLM calls by default");
   assert.strictEqual(env.DRY_RUN,              "true",    "ecosystem env must set DRY_RUN=true");
   assert.strictEqual(env.EXECUTION_MODE,       "scanner", "ecosystem env must set EXECUTION_MODE=scanner");
   assert.strictEqual(env.HEADLESS,             "true",    "ecosystem env must set HEADLESS=true");
@@ -663,6 +665,16 @@ test("ecosystem.config.cjs forces scanner/dry-run safety env", () => {
 
 // ── Group 9: Syntax checks ────────────────────────────────────
 console.log("\nGroup 9: Files pass syntax check\n");
+test("agent.js exposes LLM kill switch before provider call", () => {
+  const content = readFileSync("agent.js", "utf8");
+  assert.ok(content.includes("export function isLlmEnabled"), "agent.js must export isLlmEnabled()");
+  assert.ok(content.includes("if (!isLlmEnabled())"), "agentLoop must check isLlmEnabled()");
+  assert.ok(
+    content.indexOf("if (!isLlmEnabled())") < content.indexOf("client.chat.completions.create"),
+    "LLM kill switch must run before provider API call"
+  );
+});
+
 test("execution-modes.js passes node --check", () => {
   execSync("node --check execution-modes.js", { cwd: process.cwd(), stdio: "pipe" });
 });

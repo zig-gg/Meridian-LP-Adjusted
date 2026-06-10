@@ -83,7 +83,7 @@ const KNOWN_KEYS = new Set([
   "managementIntervalMin", "screeningIntervalMin", "healthCheckIntervalMin",
 
   // LLM
-  "temperature", "maxTokens", "maxSteps",
+  "llmEnabled", "temperature", "maxTokens", "maxSteps",
   "managementModel", "screeningModel", "generalModel",
 
   // darwin
@@ -127,6 +127,9 @@ const LIKELY_TYPOS = [
   { typo: "allowLiveExec",        correct: "allowLiveExecution" },
   { typo: "hivemindpullmode",     correct: "hiveMindPullMode" },
   { typo: "hivemind_pull_mode",   correct: "hiveMindPullMode" },
+  { typo: "llmenabled",           correct: "llmEnabled" },
+  { typo: "llmEnable",            correct: "llmEnabled" },
+  { typo: "llm_enabled",          correct: "llmEnabled" },
 ];
 
 const TYPO_MAP = new Map(LIKELY_TYPOS.map(({ typo, correct }) => [typo.toLowerCase(), { typo, correct }]));
@@ -134,6 +137,12 @@ const TYPO_MAP = new Map(LIKELY_TYPOS.map(({ typo, correct }) => [typo.toLowerCa
 const VALID_EXECUTION_MODES = new Set(["scanner", "simulate", "paper", "live"]);
 
 // ─── Helpers ──────────────────────────────────────────────────
+
+function booleanConfig(value) {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return null;
+}
 
 function isFinitePositive(v) {
   return typeof v === "number" && Number.isFinite(v) && v > 0;
@@ -241,6 +250,17 @@ export function runConfigDoctor({
   const hiveMindPullMode = runtimeConfig?.hiveMind?.pullMode
     ?? userConfig.hiveMindPullMode
     ?? "auto";
+
+  const llmEnabled = runtimeConfig?.llm?.enabled
+    ?? booleanConfig(userConfig.llmEnabled ?? env.LLM_ENABLED)
+    ?? false;
+
+  const llmKeyPresent = Boolean(
+    env.OPENROUTER_API_KEY ||
+    env.OPENAI_API_KEY ||
+    env.LLM_API_KEY ||
+    userConfig.llmApiKey
+  );
 
   const strategy = runtimeConfig?.strategy?.strategy ?? userConfig.strategy ?? "bid_ask";
 
@@ -405,7 +425,16 @@ export function runConfigDoctor({
     );
   }
 
-  // 15. Unknown keys in user-config.json (catches typos)
+  // 15.1 LLM keys present while LLM is disabled
+  if (!llmEnabled && llmKeyPresent) {
+    warnings.push(
+      `LLM is disabled, but an LLM API key is configured. ` +
+      `The key should not be used while llmEnabled=false / LLM_ENABLED=false. ` +
+      `Remove OPENROUTER_API_KEY, OPENAI_API_KEY, LLM_API_KEY, or llmApiKey unless you intentionally enable LLM calls.`
+    );
+  }
+
+  // 15.2 Unknown keys in user-config.json (catches typos)
   for (const key of Object.keys(userConfig)) {
     if (key.startsWith("_")) continue; // comment/annotation keys are intentional
     if (KNOWN_KEYS.has(key)) continue;
@@ -441,6 +470,7 @@ export function runConfigDoctor({
     `  minBinsBelow       : ${minBinsBelow}  defaultBinsBelow: ${defaultBinsBelow}  maxBinsBelow: ${maxBinsBelow}`,
     `  minBinStep         : ${minBinStep}  maxBinStep: ${maxBinStep}`,
     `  mgmtIntervalMin    : ${mgmtInterval}  screenIntervalMin: ${screenInterval}  healthIntervalMin: ${healthInterval}`,
+    `  LLM_ENABLED        : ${llmEnabled}`,
     `  hiveMindPullMode   : ${hiveMindPullMode}`,
     "───────────────────────────────────────────────────────",
   ];
@@ -484,6 +514,7 @@ export function runConfigDoctor({
       mgmtInterval,
       screenInterval,
       healthInterval,
+      llmEnabled,
       hiveMindPullMode,
     },
   };

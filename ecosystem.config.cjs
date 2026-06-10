@@ -23,6 +23,7 @@ module.exports = {
         EXECUTION_MODE: "scanner",
         HEADLESS: "true",
         ALLOW_LIVE_EXECUTION: "false",
+        LLM_ENABLED: "false",
       },
     },
   ],

@@ -10,6 +10,12 @@ Meridian runs continuous screening and management cycles for high-quality Meteor
 > Live execution is disabled by default. `ALLOW_LIVE_EXECUTION=false`, `DRY_RUN=true`, `EXECUTION_MODE=scanner`.
 > Do not fund the wallet or enable live mode until you have completed simulation testing and the full safety checklist below.
 
+### LLM cost safety
+
+Scanner/dry-run mode is also cost-safe by default. The daemon sets `LLM_ENABLED=false`, and `user-config.example.json` defaults to `"llmEnabled": false`.
+
+When LLM is disabled, cron cycles must not call OpenRouter/OpenAI/B.AI-compatible model APIs. To intentionally enable model reasoning, set `"llmEnabled": true` in `user-config.json` or `LLM_ENABLED=true` in the environment.
+
 ---
 
 ## What it does

@@ -94,7 +94,7 @@ const KNOWN_KEYS = new Set([
   "agentId", "publicApiKey", "agentMeridianApiUrl", "lpAgentRelayEnabled",
 
   // hivemind
-  "hiveMindUrl", "hiveMindApiKey", "hiveMindPullMode",
+  "hiveMindUrl", "hiveMindApiKey", "hiveMindPullMode", "hiveMindEnabled",
 
   // chart indicators (nested object — only the key itself is checked here)
   "chartIndicators",
@@ -250,6 +250,10 @@ export function runConfigDoctor({
   const hiveMindPullMode = runtimeConfig?.hiveMind?.pullMode
     ?? userConfig.hiveMindPullMode
     ?? "auto";
+
+  const hiveMindEnabled = runtimeConfig?.hiveMind?.enabled
+    ?? booleanConfig(userConfig.hiveMindEnabled ?? env.HIVEMIND_ENABLED)
+    ?? false;
 
   const llmEnabled = runtimeConfig?.llm?.enabled
     ?? booleanConfig(userConfig.llmEnabled ?? env.LLM_ENABLED)
@@ -416,9 +420,10 @@ export function runConfigDoctor({
     );
   }
 
-  // 14. hiveMindPullMode=auto in headless/scanner mode
+  // 14. hiveMindPullMode=auto in headless/scanner mode only when hiveMindEnabled is true
   if (
     hiveMindPullMode === "auto" &&
+    hiveMindEnabled &&
     (isHeadless || effectiveExecutionMode === "scanner")
   ) {
     warnings.push(
@@ -486,6 +491,7 @@ export function runConfigDoctor({
     `  LLM_ENABLED        : ${llmEnabled}`,
     `  TELEGRAM_MUTATE   : ${telegramMutationsEnabled}`,
     `  hiveMindPullMode   : ${hiveMindPullMode}`,
+    `  HIVEMIND_ENABLED   : ${hiveMindEnabled}`,
     "───────────────────────────────────────────────────────",
   ];
 
@@ -531,6 +537,7 @@ export function runConfigDoctor({
       llmEnabled,
       telegramMutationsEnabled,
       hiveMindPullMode,
+      hiveMindEnabled,
     },
   };
 }

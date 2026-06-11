@@ -642,6 +642,111 @@ test("daemon npm script sets HEADLESS=true and DRY_RUN=true", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
   const daemonScript = pkg.scripts?.daemon ?? "";
   assert.ok(daemonScript.includes("LLM_ENABLED=false"), "daemon script must disable LLM calls by default");
+  assert.ok(daemonScript.includes("HEADLESS=true"), "daemon script must set HEADLESS=true");
+  assert.ok(daemonScript.includes("DRY_RUN=true"), "daemon script must set DRY_RUN=true");
+});
+
+// ── Group 9: Static/source invariant tests ────────────────────
+console.log("\nGroup 9: Static/source invariant tests\n");
+
+test("index.js: /report is included in Telegram read-only commands", () => {
+  const content = readFileSync("index.js", "utf8");
+  const readOnlyCommands = [
+    "/help",
+    "/status",
+    "/wallet",
+    "/config",
+    "/positions",
+    "/screen",
+    "/candidates",
+    "/briefing",
+    "/report",
+  ];
+  for (const cmd of readOnlyCommands) {
+    assert.ok(content.includes(`"${cmd}"`), `index.js must include ${cmd} in read-only commands`);
+  }
+});
+
+test("index.js: startup does not unconditionally call ensureAgentId/bootstrapHiveMind/startHiveMindBackgroundSync", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Startup section must check isHiveMindEnabled() before calling HiveMind functions
+  const startupSection = content.slice(0, content.indexOf("const TP_PCT ="));
+  assert.ok(
+    startupSection.includes("if (isHiveMindEnabled())") ||
+    startupSection.includes("if (isHiveMindEnabled()) {\n    ensureAgentId();"),
+    "Startup must check isHiveMindEnabled() before calling HiveMind functions"
+  );
+});
+
+test("index.js: startup has LLM disabled log behavior", () => {
+  const content = readFileSync("index.js", "utf8");
+  const startupSection = content.slice(0, content.indexOf("const TP_PCT ="));
+
+  const ifNeedle = "if (isLlmEnabled())";
+  const modelNeedle = 'log("startup", `Model:';
+  const disabledNeedle = 'log("startup", "LLM: disabled")';
+
+  assert.ok(startupSection.includes(ifNeedle), "Startup must contain if (isLlmEnabled()) check");
+  assert.ok(startupSection.includes(modelNeedle), "Startup must contain Model log template literal");
+  assert.ok(startupSection.includes(disabledNeedle), "Startup must contain log for LLM: disabled");
+
+  const ifPos = startupSection.indexOf(ifNeedle);
+  const modelPos = startupSection.indexOf(modelNeedle);
+  const disabledPos = startupSection.indexOf(disabledNeedle);
+
+  assert.ok(modelPos > ifPos, "Model log must appear after if (isLlmEnabled())");
+  assert.ok(disabledPos > modelPos, "LLM: disabled log must appear after Model log");
+});
+
+test("scripts/config-doctor.js: KNOWN_KEYS includes hiveMindEnabled", () => {
+  const content = readFileSync("scripts/config-doctor.js", "utf8");
+  assert.ok(
+    content.includes('"hiveMindEnabled"') ||
+    content.includes("'hiveMindEnabled'"),
+    "KNOWN_KEYS in config-doctor.js must include hiveMindEnabled"
+  );
+});
+
+test("scripts/config-doctor.js: hiveMindEnabled resolved in effective config", () => {
+  const content = readFileSync("scripts/config-doctor.js", "utf8");
+  assert.ok(
+    content.includes("const hiveMindEnabled =") &&
+    content.includes("runtimeConfig?.hiveMind?.enabled") &&
+    content.includes("booleanConfig(userConfig.hiveMindEnabled ?? env.HIVEMIND_ENABLED)"),
+    "config-doctor.js must resolve hiveMindEnabled from runtimeConfig/userConfig/env"
+  );
+});
+
+test("scripts/config-doctor.js: hiveMindEnabled appears in summary table", () => {
+  const content = readFileSync("scripts/config-doctor.js", "utf8");
+  assert.ok(
+    content.includes("HIVEMIND_ENABLED") &&
+    content.includes("${hiveMindEnabled}"),
+    "config-doctor.js must include HIVEMIND_ENABLED in summary table"
+  );
+});
+
+test("scripts/config-doctor.js: hiveMindPullMode=auto warning only when hiveMindEnabled===true", () => {
+  const content = readFileSync("scripts/config-doctor.js", "utf8");
+  // Find the warning condition for hiveMindPullMode=auto
+  const lines = content.split("\n");
+  let foundAutoCheck = false;
+  let foundHiveMindEnabledCondition = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('hiveMindPullMode === "auto"')) {
+      foundAutoCheck = true;
+      // Check the next few lines for hiveMindEnabled check
+      const context = lines.slice(i, i + 4).join("\n");
+      foundHiveMindEnabledCondition = context.includes("hiveMindEnabled &&");
+    }
+  }
+  assert.ok(foundAutoCheck, "config-doctor.js must check hiveMindPullMode === 'auto'");
+  assert.ok(foundHiveMindEnabledCondition, "hiveMindPullMode=auto warning must condition on hiveMindEnabled === true");
+});
+
+test("daemon npm script sets HEADLESS=true and DRY_RUN=true", () => {
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+  const daemonScript = pkg.scripts?.daemon ?? "";
   assert.ok(daemonScript.includes("HEADLESS=true"),        "daemon script must set HEADLESS=true");
   assert.ok(daemonScript.includes("DRY_RUN=true"),         "daemon script must set DRY_RUN=true");
   assert.ok(daemonScript.includes("EXECUTION_MODE=scanner"), "daemon script must set EXECUTION_MODE=scanner");

@@ -280,7 +280,7 @@ test("LLM enabled suppresses disabled-key warning", () => {
 });
 
 test("hiveMindPullMode=auto in headless mode produces warning", () => {
-  const r = doctor({}, { hiveMindPullMode: "auto" });
+  const r = doctor({}, { hiveMindPullMode: "auto", hiveMindEnabled: true });
   // CLEAN_ENV has HEADLESS=true
   assert.ok(r.warnings.some(w => w.includes("hiveMindPullMode")));
   assert.strictEqual(r.valid, true);
@@ -289,7 +289,7 @@ test("hiveMindPullMode=auto in headless mode produces warning", () => {
 test("hiveMindPullMode=auto in scanner mode (non-headless) produces warning", () => {
   const r = runConfigDoctor({
     env: { DRY_RUN: "true", EXECUTION_MODE: "scanner" }, // no HEADLESS
-    userConfig: { ...CLEAN_CONFIG, hiveMindPullMode: "auto" },
+    userConfig: { ...CLEAN_CONFIG, hiveMindPullMode: "auto", hiveMindEnabled: true },
     userConfigExists: true,
   });
   assert.ok(r.warnings.some(w => w.includes("hiveMindPullMode")));
@@ -301,7 +301,32 @@ test("hiveMindPullMode=manual suppresses the auto-pull warning", () => {
   assert.ok(!r.warnings.some(w => w.includes("hiveMindPullMode")));
 });
 
-// ── Group 4: Unknown key / typo detection ────────────────────
+// ── Group 4: HiveMind enabled flag ────────────────────────────
+console.log("\nGroup 4: HiveMind enabled flag\n");
+
+test("hiveMindEnabled defaults false", () => {
+  const r = doctor({}, { hiveMindPullMode: "manual" });
+  assert.strictEqual(r.effective.hiveMindEnabled, false);
+});
+
+test("HIVE_MIND_ENABLED=true is recognized", () => {
+  const r = doctor({ HIVEMIND_ENABLED: "true" }, { hiveMindPullMode: "manual" });
+  assert.strictEqual(r.effective.hiveMindEnabled, true);
+});
+
+test("summary includes HIVEMIND_ENABLED", () => {
+  const r = doctor({}, { hiveMindPullMode: "manual" });
+  assert.ok(r.summary.includes("HIVEMIND_ENABLED"), "summary must include HIVEMIND_ENABLED label");
+  assert.ok(r.summary.includes("false"), "summary must include false value when disabled");
+});
+
+test("hiveMindPullMode=auto warning not emitted when hiveMindEnabled=false", () => {
+  const r = doctor({ HEADLESS: "true" }, { hiveMindPullMode: "auto", hiveMindEnabled: false });
+  assert.ok(!r.warnings.some(w => w.includes("hiveMindPullMode")), "hiveMindPullMode auto warning must not emit when hiveMindEnabled is false");
+  assert.ok(!r.warnings.some(w => w.includes("auto")));
+});
+
+// ── Group 5: Unknown key / typo detection ────────────────────
 console.log("\nGroup 4: Unknown keys and typo detection\n");
 
 test("llmEnable typo produces warning", () => {

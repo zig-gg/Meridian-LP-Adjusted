@@ -176,6 +176,7 @@ export const config = {
 
   // ─── HiveMind ─────────────────────────
   hiveMind: {
+    enabled: booleanConfig(u.hiveMindEnabled ?? process.env.HIVEMIND_ENABLED) ?? false,
     url: nonEmptyString(u.hiveMindUrl, DEFAULT_HIVEMIND_URL),
     apiKey: nonEmptyString(u.hiveMindApiKey, process.env.HIVEMIND_API_KEY, DEFAULT_HIVEMIND_API_KEY),
     agentId: u.agentId ?? null,

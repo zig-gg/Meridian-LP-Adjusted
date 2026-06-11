@@ -52,7 +52,11 @@ if (isMain) {
   log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
   log("startup", `Execution: ${process.env.EXECUTION_MODE || "scanner"}`);
   log("startup", `Headless: ${isHeadless ? "yes (daemon mode)" : "no (interactive)"}`);
-  log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
+  if (isLlmEnabled()) {
+    log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
+  } else {
+    log("startup", "LLM: disabled");
+  }
 
   // ── Config Doctor ─────────────────────────────────────────────
   // Runs before any cron cycle. Errors are always logged; in scanner/dry-run mode
@@ -76,9 +80,13 @@ if (isMain) {
     }
   })();
 
-  ensureAgentId();
-  bootstrapHiveMind().catch((error) => log("hivemind_warn", `Bootstrap failed: ${error.message}`));
-  startHiveMindBackgroundSync();
+  if (isHiveMindEnabled()) {
+    ensureAgentId();
+    bootstrapHiveMind().catch((error) => log("hivemind_warn", `Bootstrap failed: ${error.message}`));
+    startHiveMindBackgroundSync();
+  } else {
+    log("hivemind", "HiveMind: disabled — skipping registration and background sync.");
+  }
 }
 
 const TP_PCT = config.management.takeProfitPct;
@@ -1075,7 +1083,7 @@ function describeLatestCandidates(limit = 5) {
 
 function formatWalletStatus(wallet, positions) {
   const deployAmount = computeDeployAmount(wallet.sol);
-  const hive = isHiveMindEnabled() ? "on" : "off";
+  const hive = isHiveMindEnabled() ? "enabled" : "disabled";
   return [
     `Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
     `SOL price: $${wallet.sol_price}`,
@@ -1375,6 +1383,7 @@ function isTelegramReadOnlyCommand(text) {
     text === "/screen" ||
     text === "/candidates" ||
     text === "/briefing" ||
+    text === "/report" ||
     /^\/pool\s+\d+$/i.test(text)
   );
 }
@@ -1419,6 +1428,7 @@ function formatHelpText() {
     "/screen - refresh deterministic candidate list",
     "/candidates - show latest cached candidates",
     "/briefing - morning briefing (requires LLM enabled; otherwise returns disabled notice)",
+    "/report - generate position & market report",
     "",
     `Mutation commands: ${mutationStatus}`,
     "/settings - button menu for common config",
@@ -1603,6 +1613,61 @@ async function telegramHandler(msg) {
 
   if (text === "/config") {
     await sendMessage(formatConfigSnapshot()).catch(() => {});
+    return;
+  }
+
+  if (text === "/report") {
+    try {
+      const [wallet, positions, candidatesMeta] = await Promise.all([
+        getWalletBalances(),
+        getMyPositions({ force: true }),
+        getLatestCandidatesMeta(),
+      ]);
+      const cur = config.management.solMode ? "◎" : "$";
+      const totalValue = positions.positions.reduce((s, p) => s + (p.total_value_usd ?? 0), 0);
+      const totalFees = positions.positions.reduce((s, p) => s + (p.unclaimed_fees_usd ?? 0), 0);
+      const executionMode = process.env.EXECUTION_MODE || config.execution?.mode || "scanner";
+      const dryRun = process.env.DRY_RUN === "true";
+      const allowLive = process.env.ALLOW_LIVE_EXECUTION === "true";
+      const llmEnabled = isLlmEnabled();
+      const telegramMutationsEnabled = isTelegramMutationsEnabled();
+      const hiveMindEnabled = isHiveMindEnabled();
+      const candidatesCount = candidatesMeta?.candidates?.length ?? 0;
+      const candidatesUpdatedAt = candidatesMeta?.updatedAt ?? null;
+      const candidatesAgeText = candidatesUpdatedAt
+        ? new Date(candidatesUpdatedAt).toLocaleString()
+        : "never";
+      const report = [
+        "📊 Position & Market Report",
+        "",
+        `⚙️  Execution: ${executionMode} | DRY_RUN: ${dryRun} | ALLOW_LIVE: ${allowLive}`,
+        `🧠 LLM: ${llmEnabled ? "enabled" : "disabled"}`,
+        `💬 Telegram mutations: ${telegramMutationsEnabled ? "enabled" : "disabled"}`,
+        `🌐 HiveMind: ${hiveMindEnabled ? "enabled" : "disabled"}`,
+        "",
+        `💼 Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
+        `📈 Open: ${positions.total_positions}/${config.risk.maxPositions} | Value: ${cur}${totalValue.toFixed(2)} | Fees: ${cur}${totalFees.toFixed(2)}`,
+        "",
+        positions.total_positions > 0
+          ? positions.positions
+              .map((p, i) => {
+                const pnl =
+                  typeof p.pnl_pct === "number" && Number.isFinite(p.pnl_pct)
+                    ? `${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct.toFixed(1)}%`
+                    : "?";
+                const range = p.in_range ? "🟢" : `🔴 OOR ${p.minutes_out_of_range ?? 0}m`;
+                return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd?.toFixed(2)} | PnL: ${pnl} | ${range}`;
+              })
+              .join("\n")
+          : "No open positions.",
+        "",
+        `📋 Top Candidates: ${candidatesCount} available`,
+        `⏱️  Updated: ${candidatesAgeText}`,
+      ].join("\n");
+      await sendMessage(report).catch(() => {});
+    } catch (e) {
+      await sendMessage(`Error: ${e.message}`).catch(() => {});
+    }
     return;
   }
 

@@ -117,6 +117,7 @@
   },
   "telegramChatId": "",
   "telegramMutationsEnabled": false,
+  "hiveMindEnabled": false,
   "hiveMindUrl": "",
   "hiveMindApiKey": "",
   "hiveMindPullMode": "auto"

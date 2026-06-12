@@ -475,6 +475,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
         summary: "Screening skipped",
         reason: `Max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`,
       });
+      setScreeningSummary(buildScreeningSummary({ screenReport, result: "skipped", reason: "max positions reached" }));
       _screeningBusy = false;
       return screenReport;
     }
@@ -489,12 +490,14 @@ export async function runScreeningCycle({ silent = false } = {}) {
         summary: "Screening skipped",
         reason: `Insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired})`,
       });
+      setScreeningSummary(buildScreeningSummary({ screenReport, result: "skipped", reason: "insufficient SOL" }));
       _screeningBusy = false;
       return screenReport;
     }
   } catch (e) {
     log("cron_error", `Screening pre-check failed: ${e.message}`);
     screenReport = `Screening pre-check failed: ${e.message}`;
+    setScreeningSummary(buildScreeningSummary({ screenReport, result: "error", reason: e.message }));
     _screeningBusy = false;
     return screenReport;
   }
@@ -502,7 +505,12 @@ export async function runScreeningCycle({ silent = false } = {}) {
     liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
   }
   timers.screeningLastRun = Date.now();
-  log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
+  const llmEnabled = isLlmEnabled();
+  if (llmEnabled) {
+    log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
+  } else {
+    log("cron", "Starting screening cycle [LLM disabled]");
+  }
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
@@ -683,7 +691,6 @@ export async function runScreeningCycle({ silent = false } = {}) {
     });
 
     const weightsSummary = config.darwin?.enabled ? getWeightsSummary() : null;
-
     if (!isLlmEnabled()) {
       log("cron", "Screening cycle skipped LLM evaluation — LLM disabled");
       screenReport = buildNoLlmScannerReport(
@@ -696,6 +703,14 @@ export async function runScreeningCycle({ silent = false } = {}) {
         summary: "LLM disabled",
         reason: "Scanner collected deterministic candidates but skipped model evaluation because LLM is disabled.",
       });
+      setScreeningSummary(buildScreeningSummary({
+        screenReport,
+        passing,
+        filteredOut,
+        earlyFilteredExamples,
+        result: "no deploy",
+        reason: "LLM disabled",
+      }));
       return screenReport;
     }
 
@@ -813,6 +828,7 @@ IMPORTANT:
       }
     }
   }
+  setScreeningSummary(buildScreeningSummary({ screenReport }));
   return screenReport;
 }
 
@@ -1054,6 +1070,120 @@ const MAX_HISTORY = 20;    // keep last 20 messages (10 exchanges)
 let _ttyInterface = null;
 let _latestCandidates = [];
 let _latestCandidatesAt = null;
+
+// Ops-3: Scanner report quality - store latest screening cycle summary
+let _lastScreeningSummary = null; // { time, result, bestCandidate, whySkipped, rejectedList, apiErrorCount, candidatesCacheCount, safetyFlags }
+
+function setScreeningSummary(summary) {
+  _lastScreeningSummary = {
+    time: new Date().toISOString(),
+    ...summary,
+  };
+}
+
+function getScreeningSummary() {
+  return _lastScreeningSummary;
+}
+
+function buildScreeningSummary({ screenReport, passing, filteredOut, earlyFilteredExamples, result, reason }) {
+  const reportText = String(screenReport || "");
+  const reportLower = reportText.toLowerCase();
+
+  let resultType = result || "unknown";
+
+  if (!result) {
+    if (reportLower.includes("deploying") || reportLower.includes("deployed") || reportLower.includes("successfully")) {
+      resultType = "deploy";
+    } else if (
+      reportLower.includes("no deploy") ||
+      reportLower.includes("no_deploy") ||
+      reportLower.includes("no candidates") ||
+      reportLower.includes("no suitable")
+    ) {
+      resultType = "no deploy";
+    } else if (reportLower.includes("skipped") || reportLower.includes("screening skipped")) {
+      resultType = "skipped";
+    } else if (reportLower.includes("failed") || reportLower.includes("error")) {
+      resultType = "error";
+    }
+  }
+
+  const rejectedSources = [
+    ...(Array.isArray(filteredOut) ? filteredOut : []),
+    ...(Array.isArray(earlyFilteredExamples) ? earlyFilteredExamples : []),
+  ];
+
+  const rejectedList = rejectedSources.slice(0, 5).map((item) => {
+    if (!item) return "unknown";
+    if (typeof item === "string") return item;
+
+    const name =
+      item.name ||
+      item.pool?.name ||
+      item.symbol ||
+      item.poolAddress ||
+      item.address ||
+      "unknown";
+
+    const itemReason =
+      item.reason ||
+      item.why ||
+      item.skipReason ||
+      item.error ||
+      null;
+
+    return itemReason ? `${name}: ${itemReason}` : name;
+  });
+
+  const bestPassing = Array.isArray(passing) && passing.length > 0 ? passing[0] : null;
+  const bestCached = Array.isArray(_latestCandidates) && _latestCandidates.length > 0 ? _latestCandidates[0] : null;
+  const best = bestPassing || bestCached;
+
+  const bestCandidate =
+    best?.pool?.name ||
+    best?.name ||
+    best?.symbol ||
+    best?.poolAddress ||
+    best?.address ||
+    null;
+
+  const envBool = (name, fallback) => {
+    if (process.env[name] === undefined) return fallback;
+    return String(process.env[name]).toLowerCase() === "true";
+  };
+
+  const safetyFlags = {
+    executionMode: process.env.EXECUTION_MODE || config.execution?.mode || config.executionMode || "scanner",
+    dryRun: envBool("DRY_RUN", config.execution?.dryRun ?? config.dryRun ?? true),
+    allowLive: envBool(
+      "ALLOW_LIVE_EXECUTION",
+      config.execution?.allowLiveExecution ?? config.allowLiveExecution ?? false
+    ),
+    llm: isLlmEnabled(),
+    telegramMutations: isTelegramMutationsEnabled(),
+    hiveMind: isHiveMindEnabled(),
+  };
+
+  return {
+    result: resultType,
+    bestCandidate,
+    whySkipped: reason || extractSkipReason(reportText) || null,
+    rejectedList,
+    apiErrorCount: "not tracked",
+    candidatesCacheCount: Array.isArray(_latestCandidates) ? _latestCandidates.length : 0,
+    safetyFlags,
+  };
+}
+
+function extractSkipReason(report) {
+  if (!report) return null;
+  // Extract "WHY SKIPPED" or similar reason from report
+  const whyMatch = report.match(/WHY SKIPPED[:\s]*(.+?)(?:\n|$)/i);
+  if (whyMatch) return whyMatch[1].trim();
+  const noDeployMatch = report.match(/NO DEPLOY[:\s]*(.+?)(?:\n|$)/i);
+  if (noDeployMatch) return noDeployMatch[1].trim();
+  return null;
+}
 
 function setLatestCandidates(candidates = []) {
   _latestCandidates = Array.isArray(candidates) ? candidates : [];
@@ -1637,6 +1767,34 @@ async function telegramHandler(msg) {
       const candidatesAgeText = candidatesUpdatedAt
         ? new Date(candidatesUpdatedAt).toLocaleString()
         : "never";
+
+      // Ops-3: Include latest screening summary if available
+      const screeningSummary = getScreeningSummary();
+      let screeningSummaryBlock = "";
+      if (screeningSummary) {
+        const lastTime = screeningSummary.time ? new Date(screeningSummary.time).toLocaleString() : "unknown";
+        const result = screeningSummary.result || "unknown";
+        const bestCandidate = screeningSummary.bestCandidate || "none";
+        const whySkipped = screeningSummary.whySkipped || "N/A";
+        const rejected = screeningSummary.rejectedList?.length ? screeningSummary.rejectedList.slice(0, 5).join(", ") : "none";
+        const apiErrorCount = screeningSummary.apiErrorCount ?? "not tracked";
+        const cacheCount = screeningSummary.candidatesCacheCount ?? candidatesCount;
+        const flags = screeningSummary.safetyFlags || {};
+        screeningSummaryBlock = [
+          "",
+          `Last screening: ${lastTime}`,
+          `Result: ${result}`,
+          `Best candidate: ${bestCandidate}`,
+          `Why skipped: ${whySkipped}`,
+          `Rejected (max 5): ${rejected}`,
+          `API errors/unavailable: ${apiErrorCount}`,
+          `Candidates cache: ${cacheCount}`,
+          `Safety flags: exec=${flags.executionMode || executionMode} | dryRun=${flags.dryRun ?? dryRun} | allowLive=${flags.allowLive ?? allowLive} | llm=${flags.llm ?? (llmEnabled ? "enabled" : "disabled")} | tg=${flags.telegramMutations ?? (telegramMutationsEnabled ? "enabled" : "disabled")} | hive=${flags.hiveMind ?? (hiveMindEnabled ? "enabled" : "disabled")}`,
+        ].join("\n");
+      } else {
+        screeningSummaryBlock = "\nLast screening: no cycle summary recorded yet.";
+      }
+
       const report = [
         "📊 Position & Market Report",
         "",
@@ -1663,6 +1821,7 @@ async function telegramHandler(msg) {
         "",
         `📋 Top Candidates: ${candidatesCount} available`,
         `⏱️  Updated: ${candidatesAgeText}`,
+        screeningSummaryBlock,
       ].join("\n");
       await sendMessage(report).catch(() => {});
     } catch (e) {

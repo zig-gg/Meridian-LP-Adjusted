@@ -22,6 +22,7 @@
     "test:agent": "cross-env DRY_RUN=true node test/test-agent.js",
     "test:phase1": "node test/test-phase1.js",
     "test:config": "node test/test-config-doctor.js",
+    "ledger:summary": "node scripts/summarize-ledger.js",
     "config:check": "node scripts/config-doctor.js",
     "postinstall": "node scripts/patch-anchor.js"
   },

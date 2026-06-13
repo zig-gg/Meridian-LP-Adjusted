@@ -27,6 +27,10 @@ decision-log.json
 hivemind-cache.json
 signal-weights.json
 
+# Decision ledgers (append-only runtime logs)
+data/
+decision-ledger.jsonl
+
 # Logs
 logs/
 

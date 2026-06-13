@@ -34,7 +34,7 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
-import { appendDecisionLedger, getLastLedgerWrite, getLedgerPath } from "./decision-ledger.js";
+import { appendDecisionLedger, getLastLedgerWrite, getLedgerPath, getLedgerStats } from "./decision-ledger.js";
 import { runConfigDoctor } from "./scripts/config-doctor.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
@@ -1721,6 +1721,8 @@ function isTelegramReadOnlyCommand(text) {
     text === "/candidates" ||
     text === "/briefing" ||
     text === "/report" ||
+    text === "/wallet-ready" ||
+    text === "/readiness" ||
     /^\/pool\s+\d+$/i.test(text)
   );
 }
@@ -1763,9 +1765,11 @@ function formatHelpText() {
     "/pool <n> - detailed info for one open position",
     "/config - show important runtime config",
     "/screen - refresh deterministic candidate list",
-    "/candidates - show latest cached candidates",
+    "/candidates - show latest cached candidates (with age + stale warning)",
     "/briefing - morning briefing (requires LLM enabled; otherwise returns disabled notice)",
-    "/report - generate position & market report",
+    "/report - generate position & market report (with cache freshness + wallet readiness)",
+    "/wallet-ready - show wallet readiness + reasons (read-only)",
+    "/readiness - alias for /wallet-ready",
     "",
     `Mutation commands: ${mutationStatus}`,
     "/settings - button menu for common config",
@@ -1881,6 +1885,126 @@ async function drainTelegramQueue() {
   }
 }
 
+
+
+// ----- Observation readiness helpers (read-only) -----
+const CACHE_STALE_MS = 2 * 60 * 60 * 1000;
+
+function formatAge(ms) {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "unknown";
+  const totalMin = Math.floor(ms / 60000);
+  if (totalMin < 1) return "less than 1m";
+  if (totalMin < 60) return totalMin + "m";
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h < 24) return m === 0 ? h + "h" : h + "h " + m + "m";
+  const d = Math.floor(h / 24);
+  const rh = h % 24;
+  return rh === 0 ? d + "d" : d + "d " + rh + "h";
+}
+
+function getCandidatesStaleness() {
+  const updatedAt = _latestCandidatesAt ? new Date(_latestCandidatesAt).getTime() : null;
+  if (!updatedAt) {
+    return { updatedAt: null, ageMs: null, ageText: "never", stale: true, reason: "no cache" };
+  }
+  const ageMs = Date.now() - updatedAt;
+  const staleByAge = ageMs > CACHE_STALE_MS;
+  const summary = getScreeningSummary();
+  let staleBySummary = false;
+  let summaryTime = null;
+  if (summary && summary.time) {
+    summaryTime = new Date(summary.time).getTime();
+    if (Number.isFinite(summaryTime) && summaryTime > updatedAt) {
+      staleBySummary = true;
+    }
+  }
+  return {
+    updatedAt,
+    ageMs,
+    ageText: formatAge(ageMs),
+    stale: staleByAge || staleBySummary,
+    reason: staleBySummary
+      ? "newer screening summary exists"
+      : staleByAge
+        ? "older than 2h"
+        : "fresh",
+    summaryTime,
+  };
+}
+
+function getExecutionFlags() {
+  return {
+    executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+    dryRun: process.env.DRY_RUN === "true",
+    allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+    llm: isLlmEnabled(),
+    telegramMutations: isTelegramMutationsEnabled(),
+    hiveMind: isHiveMindEnabled(),
+  };
+}
+
+function buildReadinessReport(wallet) {
+  const flags = getExecutionFlags();
+  const solBalance = Number(wallet && wallet.sol != null ? wallet.sol : 0);
+  const reasons = [];
+  if (!Number.isFinite(solBalance) || solBalance <= 0) reasons.push("wallet balance is 0 SOL");
+  if (flags.executionMode !== "live") reasons.push("execution mode is " + flags.executionMode);
+  if (flags.dryRun) reasons.push("DRY_RUN is true");
+  if (!flags.allowLive) reasons.push("ALLOW_LIVE is false");
+  if (!flags.telegramMutations) reasons.push("Telegram mutations are disabled");
+  if (!flags.llm) reasons.push("LLM is disabled");
+  if (!flags.hiveMind) reasons.push("HiveMind is disabled");
+  reasons.push("need more observation cycles before funding");
+  return { ready: false, flags, walletSol: solBalance, reasons };
+}
+
+function describeLatestCandidatesWithFreshness(limit) {
+  if (limit == null) limit = 5;
+  if (!_latestCandidates.length) {
+    return "No cached candidates yet. Run /screen first.";
+  }
+  const lines = _latestCandidates.slice(0, limit).map(function (pool, i) {
+    const feeTvl = pool.fee_active_tvl_ratio != null ? pool.fee_active_tvl_ratio : (pool.fee_tvl_ratio != null ? pool.fee_tvl_ratio : "?");
+    const vol = pool.volume_window != null ? pool.volume_window : (pool.volume_24h != null ? pool.volume_24h : "?");
+    const active = pool.active_pct != null ? pool.active_pct : "?";
+    const organic = pool.organic_score != null ? pool.organic_score : "?";
+    return (i + 1) + ". " + pool.name + " | fee/aTVL " + feeTvl + "% | vol $" + vol + " | in-range " + active + "% | organic " + organic;
+  });
+  const staleness = getCandidatesStaleness();
+  const age = staleness.updatedAt
+    ? new Date(staleness.updatedAt).toLocaleString("en-US", { hour12: false })
+    : "unknown";
+  const ageText = staleness.ageText;
+  const warning = staleness.stale
+    ? "\n\nWarning: Cache is STALE (" + staleness.reason + "; age " + ageText + "). Run /screen to refresh."
+    : "\n\nCache age: " + ageText + " (fresh).";
+  return "Latest candidates (" + _latestCandidates.length + ") -- updated " + age + " (" + ageText + " ago)" + warning + "\n\n" + lines.join("\n");
+}
+
+function formatWalletReadiness(wallet) {
+  const r = buildReadinessReport(wallet);
+  const f = r.flags;
+  const lines = [
+    "Wallet readiness: NOT READY",
+    "",
+    "Reasons:",
+  ];
+  for (const s of r.reasons) lines.push("- " + s);
+  lines.push("");
+  lines.push("Flags:");
+  lines.push("- execution mode: " + f.executionMode);
+  lines.push("- DRY_RUN: " + f.dryRun);
+  lines.push("- ALLOW_LIVE: " + f.allowLive);
+  lines.push("- Telegram mutations: " + (f.telegramMutations ? "enabled" : "disabled"));
+  lines.push("- LLM: " + (f.llm ? "enabled" : "disabled"));
+  lines.push("- HiveMind: " + (f.hiveMind ? "enabled" : "disabled"));
+  lines.push("- Wallet: " + (Number.isFinite(r.walletSol) ? r.walletSol + " SOL" : "unknown"));
+  lines.push("");
+  lines.push("This is observation mode. Continue accumulating screening cycles.");
+  return lines.join("\n");
+}
+
 async function telegramHandler(msg) {
   const text = msg?.text?.trim();
   if (!text) return;
@@ -1974,6 +2098,8 @@ async function telegramHandler(msg) {
       const candidatesAgeText = candidatesUpdatedAt
         ? new Date(candidatesUpdatedAt).toLocaleString()
         : "never";
+      const staleness = getCandidatesStaleness();
+      const readiness = buildReadinessReport(wallet);
 
       // Ops-3: Include latest screening summary if available
       const screeningSummary = getScreeningSummary();
@@ -2002,14 +2128,14 @@ async function telegramHandler(msg) {
         screeningSummaryBlock = "\nLast screening: no cycle summary recorded yet.";
       }
 
-      // Decision ledger info
-      const lastLedgerWrite = getLastLedgerWrite();
-      const ledgerPath = getLedgerPath();
+      // Decision ledger info (read-only)
+      const ledgerStats = getLedgerStats();
       const ledgerBlock = [
         "",
-        `Decision ledger: enabled`,
-        `Last ledger write: ${lastLedgerWrite ? new Date(lastLedgerWrite).toLocaleString() : "never"}`,
-        `Ledger path: ${ledgerPath}`,
+        `Decision ledger: ${ledgerStats.enabled ? "enabled" : "disabled"}`,
+        `Last ledger write: ${ledgerStats.lastWrite ? new Date(ledgerStats.lastWrite).toLocaleString() : "never"}`,
+        `Ledger entry count: ${ledgerStats.count}`,
+        `Ledger path: ${ledgerStats.path}`,
       ].join("\n");
 
       const report = [
@@ -2037,11 +2163,26 @@ async function telegramHandler(msg) {
           : "No open positions.",
         "",
         `📋 Top Candidates: ${candidatesCount} available`,
-        `⏱️  Updated: ${candidatesAgeText}`,
+        `⏱️  Cached: ${candidatesAgeText}`,
+        `🕒 Cache age: ${staleness.ageText}`,
+        `⚠️ Stale: ${staleness.stale ? `yes (${staleness.reason})` : "no"}`,
         screeningSummaryBlock,
         ledgerBlock,
+        "",
+        `🛡️  Wallet readiness: ${readiness.ready ? "READY" : "NOT READY"}`,
+        `Reasons: ${readiness.reasons.slice(0, -1).join("; ") || "need more observation cycles before funding"}`,
       ].join("\n");
       await sendMessage(report).catch(() => {});
+    } catch (e) {
+      await sendMessage(`Error: ${e.message}`).catch(() => {});
+    }
+    return;
+  }
+
+  if (text === "/wallet-ready" || text === "/readiness") {
+    try {
+      const wallet = await getWalletBalances();
+      await sendMessage(formatWalletReadiness(wallet)).catch(() => {});
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }
@@ -2175,7 +2316,7 @@ async function telegramHandler(msg) {
   }
 
   if (text === "/candidates") {
-    await sendMessage(describeLatestCandidates(5)).catch(() => {});
+    await sendMessage(describeLatestCandidatesWithFreshness(5)).catch(() => {});
     return;
   }
 

@@ -34,6 +34,7 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
+import { appendDecisionLedger, getLastLedgerWrite, getLedgerPath } from "./decision-ledger.js";
 import { runConfigDoctor } from "./scripts/config-doctor.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
@@ -475,6 +476,22 @@ export async function runScreeningCycle({ silent = false } = {}) {
         summary: "Screening skipped",
         reason: `Max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`,
       });
+      appendDecisionLedger({
+        result: "no_deploy",
+        mode: "skipped",
+        reason: `Max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`,
+        candidateCount: 0,
+        candidatesCacheCount: _latestCandidates.length,
+        apiErrorCount: "not tracked",
+        safetyFlags: {
+          executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+          dryRun: process.env.DRY_RUN === "true",
+          allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+          llmEnabled: isLlmEnabled(),
+          telegramMutationsEnabled: isTelegramMutationsEnabled(),
+          hiveMindEnabled: isHiveMindEnabled(),
+        },
+      });
       setScreeningSummary(buildScreeningSummary({ screenReport, result: "skipped", reason: "max positions reached" }));
       _screeningBusy = false;
       return screenReport;
@@ -490,6 +507,22 @@ export async function runScreeningCycle({ silent = false } = {}) {
         summary: "Screening skipped",
         reason: `Insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired})`,
       });
+      appendDecisionLedger({
+        result: "no_deploy",
+        mode: "skipped",
+        reason: `Insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired})`,
+        candidateCount: 0,
+        candidatesCacheCount: _latestCandidates.length,
+        apiErrorCount: "not tracked",
+        safetyFlags: {
+          executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+          dryRun: process.env.DRY_RUN === "true",
+          allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+          llmEnabled: isLlmEnabled(),
+          telegramMutationsEnabled: isTelegramMutationsEnabled(),
+          hiveMindEnabled: isHiveMindEnabled(),
+        },
+      });
       setScreeningSummary(buildScreeningSummary({ screenReport, result: "skipped", reason: "insufficient SOL" }));
       _screeningBusy = false;
       return screenReport;
@@ -497,6 +530,22 @@ export async function runScreeningCycle({ silent = false } = {}) {
   } catch (e) {
     log("cron_error", `Screening pre-check failed: ${e.message}`);
     screenReport = `Screening pre-check failed: ${e.message}`;
+    appendDecisionLedger({
+      result: "error",
+      mode: "error",
+      reason: `Screening pre-check failed: ${e.message}`,
+      candidateCount: 0,
+      candidatesCacheCount: _latestCandidates.length,
+      apiErrorCount: "not tracked",
+      safetyFlags: {
+        executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+        dryRun: process.env.DRY_RUN === "true",
+        allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+        llmEnabled: isLlmEnabled(),
+        telegramMutationsEnabled: isTelegramMutationsEnabled(),
+        hiveMindEnabled: isHiveMindEnabled(),
+      },
+    });
     setScreeningSummary(buildScreeningSummary({ screenReport, result: "error", reason: e.message }));
     _screeningBusy = false;
     return screenReport;
@@ -585,6 +634,26 @@ export async function runScreeningCycle({ silent = false } = {}) {
           reason: combinedExamples || "All candidates filtered before deploy",
           rejected: combined.slice(0, 5).map((entry) => `${entry.name}: ${entry.reason}`),
         });
+        appendDecisionLedger({
+          result: "no_deploy",
+          mode: "filtered",
+          reason: combinedExamples || "All candidates filtered before deploy",
+          bestCandidate: null,
+          bestCandidatePool: null,
+          topCandidates: [],
+          rejected: combined.slice(0, 5).map((e) => ({ name: e.name, reason: e.reason })),
+          candidateCount: 0,
+          candidatesCacheCount: allCandidates.length,
+          apiErrorCount: "not tracked",
+          safetyFlags: {
+            executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+            dryRun: process.env.DRY_RUN === "true",
+            allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+            llmEnabled: isLlmEnabled(),
+            telegramMutationsEnabled: isTelegramMutationsEnabled(),
+            hiveMindEnabled: isHiveMindEnabled(),
+          },
+        });
         setScreeningSummary(buildScreeningSummary({
           screenReport,
           passing,
@@ -621,6 +690,26 @@ export async function runScreeningCycle({ silent = false } = {}) {
           reason: skipReason,
           pool: passing[0].pool?.pool,
           pool_name: candidateName,
+        });
+        appendDecisionLedger({
+          result: "no_deploy",
+          mode: "single_candidate_skipped",
+          reason: `Single candidate skipped: ${skipReason}`,
+          bestCandidate: candidateName,
+          bestCandidatePool: passing[0].pool?.pool,
+          topCandidates: [],
+          rejected: [{ name: candidateName, reason: skipReason }],
+          candidateCount: 1,
+          candidatesCacheCount: allCandidates.length,
+          apiErrorCount: "not tracked",
+          safetyFlags: {
+            executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+            dryRun: process.env.DRY_RUN === "true",
+            allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+            llmEnabled: isLlmEnabled(),
+            telegramMutationsEnabled: isTelegramMutationsEnabled(),
+            hiveMindEnabled: isHiveMindEnabled(),
+          },
         });
         setScreeningSummary(buildScreeningSummary({
           screenReport,
@@ -718,6 +807,38 @@ export async function runScreeningCycle({ silent = false } = {}) {
         actor: "SCREENER",
         summary: "LLM disabled",
         reason: "Scanner collected deterministic candidates but skipped model evaluation because LLM is disabled.",
+      });
+      // Build top candidates for ledger (max 5)
+      const topCandidatesForLedger = passing.slice(0, 5).map((c) => ({
+        name: c.pool?.name || null,
+        pool_address: c.pool?.pool || null,
+        tvl: c.pool?.tvl ?? c.pool?.active_tvl ?? null,
+        volume: c.pool?.volume_window ?? null,
+        fee_tvl: c.pool?.fee_active_tvl_ratio ?? null,
+      }));
+      const rejectedForLedger = [...filteredOut, ...earlyFilteredExamples].slice(0, 5).map((e) => ({
+        name: e.name,
+        reason: e.reason,
+      }));
+      appendDecisionLedger({
+        result: "no_deploy",
+        mode: "deterministic_no_llm",
+        reason: "LLM disabled - scanner collected deterministic candidates but skipped model evaluation",
+        bestCandidate: passing[0]?.pool?.name || null,
+        bestCandidatePool: passing[0]?.pool?.pool || null,
+        topCandidates: topCandidatesForLedger,
+        rejected: rejectedForLedger,
+        candidateCount: passing.length,
+        candidatesCacheCount: allCandidates.length,
+        apiErrorCount: "not tracked",
+        safetyFlags: {
+          executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+          dryRun: process.env.DRY_RUN === "true",
+          allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+          llmEnabled: isLlmEnabled(),
+          telegramMutationsEnabled: isTelegramMutationsEnabled(),
+          hiveMindEnabled: isHiveMindEnabled(),
+        },
       });
       setScreeningSummary(buildScreeningSummary({
         screenReport,
@@ -824,6 +945,32 @@ IMPORTANT:
         summary: "LLM chose no deploy",
         reason: stripThink(content).slice(0, 500),
       });
+      appendDecisionLedger({
+        result: "no_deploy",
+        mode: "llm",
+        reason: "LLM chose no deploy",
+        bestCandidate: passing[0]?.pool?.name || null,
+        bestCandidatePool: passing[0]?.pool?.pool || null,
+        topCandidates: passing.slice(0, 5).map((c) => ({
+          name: c.pool?.name || null,
+          pool_address: c.pool?.pool || null,
+          tvl: c.pool?.tvl ?? c.pool?.active_tvl ?? null,
+          volume: c.pool?.volume_window ?? null,
+          fee_tvl: c.pool?.fee_active_tvl_ratio ?? null,
+        })),
+        rejected: [],
+        candidateCount: passing.length,
+        candidatesCacheCount: allCandidates.length,
+        apiErrorCount: "not tracked",
+        safetyFlags: {
+          executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+          dryRun: process.env.DRY_RUN === "true",
+          allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+          llmEnabled: isLlmEnabled(),
+          telegramMutationsEnabled: isTelegramMutationsEnabled(),
+          hiveMindEnabled: isHiveMindEnabled(),
+        },
+      });
     } else if (!deploySucceeded) {
       appendDecision({
         type: "no_deploy",
@@ -831,10 +978,54 @@ IMPORTANT:
         summary: deployAttempted ? "Deploy attempt did not succeed" : "No successful deploy in screening cycle",
         reason: stripThink(content).slice(0, 500),
       });
+      appendDecisionLedger({
+        result: "no_deploy",
+        mode: "llm",
+        reason: deployAttempted ? "Deploy attempt did not succeed" : "No successful deploy in screening cycle",
+        bestCandidate: passing[0]?.pool?.name || null,
+        bestCandidatePool: passing[0]?.pool?.pool || null,
+        topCandidates: passing.slice(0, 5).map((c) => ({
+          name: c.pool?.name || null,
+          pool_address: c.pool?.pool || null,
+          tvl: c.pool?.tvl ?? c.pool?.active_tvl ?? null,
+          volume: c.pool?.volume_window ?? null,
+          fee_tvl: c.pool?.fee_active_tvl_ratio ?? null,
+        })),
+        rejected: [],
+        candidateCount: passing.length,
+        candidatesCacheCount: allCandidates.length,
+        apiErrorCount: "not tracked",
+        safetyFlags: {
+          executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+          dryRun: process.env.DRY_RUN === "true",
+          allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+          llmEnabled: isLlmEnabled(),
+          telegramMutationsEnabled: isTelegramMutationsEnabled(),
+          hiveMindEnabled: isHiveMindEnabled(),
+        },
+      });
     }
+    // Note: deploy success is handled by deploy_position tool's own decision logging
+    // The tool already logs decisions via appendDecision
   } catch (error) {
     log("cron_error", `Screening cycle failed: ${error.message}`);
     screenReport = `Screening cycle failed: ${error.message}`;
+    appendDecisionLedger({
+      result: "error",
+      mode: "error",
+      reason: `Screening cycle failed: ${error.message}`,
+      candidateCount: 0,
+      candidatesCacheCount: _latestCandidates.length,
+      apiErrorCount: "not tracked",
+      safetyFlags: {
+        executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
+        dryRun: process.env.DRY_RUN === "true",
+        allowLive: process.env.ALLOW_LIVE_EXECUTION === "true",
+        llmEnabled: isLlmEnabled(),
+        telegramMutationsEnabled: isTelegramMutationsEnabled(),
+        hiveMindEnabled: isHiveMindEnabled(),
+      },
+    });
   } finally {
     _screeningBusy = false;
     if (!silent && telegramEnabled()) {
@@ -1811,6 +2002,16 @@ async function telegramHandler(msg) {
         screeningSummaryBlock = "\nLast screening: no cycle summary recorded yet.";
       }
 
+      // Decision ledger info
+      const lastLedgerWrite = getLastLedgerWrite();
+      const ledgerPath = getLedgerPath();
+      const ledgerBlock = [
+        "",
+        `Decision ledger: enabled`,
+        `Last ledger write: ${lastLedgerWrite ? new Date(lastLedgerWrite).toLocaleString() : "never"}`,
+        `Ledger path: ${ledgerPath}`,
+      ].join("\n");
+
       const report = [
         "📊 Position & Market Report",
         "",
@@ -1838,6 +2039,7 @@ async function telegramHandler(msg) {
         `📋 Top Candidates: ${candidatesCount} available`,
         `⏱️  Updated: ${candidatesAgeText}`,
         screeningSummaryBlock,
+        ledgerBlock,
       ].join("\n");
       await sendMessage(report).catch(() => {});
     } catch (e) {

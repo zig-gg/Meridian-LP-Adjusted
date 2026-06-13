@@ -110,6 +110,7 @@ export function summarizeLedger(filePath = LEDGER_PATH) {
 
   const entries = parseEntries(text);
   result.total = entries.length;
+  const total = result.total;
   result.firstTs = total > 0 ? entries[0]?.timestamp || null : null;
   result.lastTs = total > 0 ? entries[total - 1]?.timestamp || null : null;
   result.byResult = countBy(entries, "result");

@@ -59,3 +59,32 @@ export function getLastLedgerWrite() {
 export function getLedgerPath() {
   return LEDGER_FILE;
 }
+
+/**
+ * Safe, read-only stats for the decision ledger.
+ * Counts JSONL rows, returns the last timestamp, and never reads secrets or
+ * calls the network. Used by read-only Telegram reporting.
+ *
+ * @returns {{enabled: boolean, path: string, count: number, lastWrite: string|null, lastMode: string|null, lastResult: string|null}}
+ */
+export function getLedgerStats() {
+  const path = LEDGER_FILE;
+  const base = { enabled: true, path, count: 0, lastWrite: null, lastMode: null, lastResult: null };
+  try {
+    if (!fs.existsSync(path)) return base;
+    const content = fs.readFileSync(path, "utf8");
+    const lines = content.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return base;
+    const last = JSON.parse(lines[lines.length - 1]);
+    return {
+      ...base,
+      count: lines.length,
+      lastWrite: last?.timestamp || null,
+      lastMode: last?.mode || null,
+      lastResult: last?.result || null,
+    };
+  } catch (error) {
+    log("ledger_warn", `getLedgerStats failed: ${error.message}`);
+    return base;
+  }
+}

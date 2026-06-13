@@ -35,6 +35,7 @@ import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
 import { appendDecisionLedger, getLastLedgerWrite, getLedgerPath, getLedgerStats } from "./decision-ledger.js";
+import { summarizeLedger, formatLedgerSummary } from "./scripts/summarize-ledger.js";
 import { runConfigDoctor } from "./scripts/config-doctor.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
@@ -1723,6 +1724,8 @@ function isTelegramReadOnlyCommand(text) {
     text === "/report" ||
     text === "/wallet-ready" ||
     text === "/readiness" ||
+    text === "/ledger" ||
+    text === "/evidence" ||
     /^\/pool\s+\d+$/i.test(text)
   );
 }
@@ -1770,6 +1773,8 @@ function formatHelpText() {
     "/report - generate position & market report (with cache freshness + wallet readiness)",
     "/wallet-ready - show wallet readiness + reasons (read-only)",
     "/readiness - alias for /wallet-ready",
+    "/ledger - decision-ledger summary (read-only)",
+    "/evidence - alias for /ledger (read-only)",
     "",
     `Mutation commands: ${mutationStatus}`,
     "/settings - button menu for common config",
@@ -2317,6 +2322,17 @@ async function telegramHandler(msg) {
 
   if (text === "/candidates") {
     await sendMessage(describeLatestCandidatesWithFreshness(5)).catch(() => {});
+    return;
+  }
+
+  if (text === "/ledger" || text === "/evidence") {
+    try {
+      const summary = summarizeLedger();
+      const body = formatLedgerSummary(summary, { compact: true });
+      await sendMessage(body).catch(() => {});
+    } catch (e) {
+      await sendMessage(`Error: ${e.message}`).catch(() => {});
+    }
     return;
   }
 

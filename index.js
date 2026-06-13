@@ -578,15 +578,23 @@ export async function runScreeningCycle({ silent = false } = {}) {
       screenReport = combinedExamples
         ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
         : `No candidates available (all filtered by launchpad / holder-quality rules).`;
-      appendDecision({
-        type: "no_deploy",
-        actor: "SCREENER",
-        summary: "No candidates available",
-        reason: combinedExamples || "All candidates filtered before deploy",
-        rejected: combined.slice(0, 5).map((entry) => `${entry.name}: ${entry.reason}`),
-      });
-      return screenReport;
-    }
+        appendDecision({
+          type: "no_deploy",
+          actor: "SCREENER",
+          summary: "No candidates available",
+          reason: combinedExamples || "All candidates filtered before deploy",
+          rejected: combined.slice(0, 5).map((entry) => `${entry.name}: ${entry.reason}`),
+        });
+        setScreeningSummary(buildScreeningSummary({
+          screenReport,
+          passing,
+          filteredOut,
+          earlyFilteredExamples,
+          result: "no deploy",
+          reason: combinedExamples || "All candidates filtered before deploy",
+        }));
+        return screenReport;
+      }
 
     if (passing.length === 1) {
       const skipReason = getLoneCandidateSkipReason(passing[0]);
@@ -614,6 +622,14 @@ export async function runScreeningCycle({ silent = false } = {}) {
           pool: passing[0].pool?.pool,
           pool_name: candidateName,
         });
+        setScreeningSummary(buildScreeningSummary({
+          screenReport,
+          passing,
+          filteredOut,
+          earlyFilteredExamples,
+          result: "no deploy",
+          reason: skipReason,
+        }));
         return screenReport;
       }
     }

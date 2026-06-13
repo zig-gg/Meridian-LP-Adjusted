@@ -9,6 +9,14 @@
  * Constraints:
  *  - No .env reads, no network, no exec/spawn.
  *  - Safe when the ledger file is missing or malformed.
+ *
+ * Exports:
+ *  - summarizeLedger()                         -> { ok, path, total, firstTs, lastTs,
+ *                                                  byResult, byMode, topCandidates,
+ *                                                  topReasons, last, error? }
+ *  - formatLedgerSummary(summary, options?)    -> string
+ *    options.compact (default false)           -> compact multi-line summary,
+ *                                                  suitable for Telegram.
  */
 
 import fs from "fs";
@@ -73,60 +81,155 @@ function summarizeLast(entry) {
   return parts.join(" | ");
 }
 
-function printTable(title, rows) {
-  console.log(`\n${title}`);
-  if (rows.length === 0) {
-    console.log("  (none)");
-    return;
-  }
-  for (const [label, count] of rows) {
-    console.log(`  ${count.toString().padStart(4)}  ${label}`);
-  }
-}
+export function summarizeLedger(filePath = LEDGER_PATH) {
+  const result = {
+    ok: false,
+    path: filePath,
+    total: 0,
+    firstTs: null,
+    lastTs: null,
+    byResult: [],
+    byMode: [],
+    topCandidates: [],
+    topReasons: [],
+    last: null,
+  };
 
-function main() {
-  if (!fs.existsSync(LEDGER_PATH)) {
-    console.log(`Ledger file not found: ${LEDGER_PATH}`);
-    console.log("Nothing to summarize.");
-    return;
+  if (!fs.existsSync(filePath)) {
+    result.error = `Ledger file not found: ${filePath}`;
+    return result;
   }
 
   let text;
   try {
-    text = fs.readFileSync(LEDGER_PATH, "utf8");
+    text = fs.readFileSync(filePath, "utf8");
   } catch (error) {
-    console.log(`Failed to read ledger: ${error.message}`);
-    return;
+    result.error = `Failed to read ledger: ${error.message}`;
+    return result;
   }
 
   const entries = parseEntries(text);
-  const total = entries.length;
-  const firstTs = total > 0 ? entries[0]?.timestamp || null : null;
-  const lastTs = total > 0 ? entries[total - 1]?.timestamp || null : null;
-
-  console.log("Decision Ledger Summary");
-  console.log(`path: ${LEDGER_PATH}`);
-  console.log(`total entries: ${total}`);
-  console.log(`first timestamp: ${firstTs ?? "(none)"}`);
-  console.log(`last timestamp:  ${lastTs ?? "(none)"}`);
-
-  printTable("count by result", countBy(entries, "result"));
-  printTable("count by mode", countBy(entries, "mode"));
-
-  const topCandidates = topStrings(
+  result.total = entries.length;
+  result.firstTs = total > 0 ? entries[0]?.timestamp || null : null;
+  result.lastTs = total > 0 ? entries[total - 1]?.timestamp || null : null;
+  result.byResult = countBy(entries, "result");
+  result.byMode = countBy(entries, "mode");
+  result.topCandidates = topStrings(
     entries,
     (e) => e?.bestCandidate || e?.bestCandidatePool || null,
     TOP_N
   );
-  printTable(`top bestCandidate names (top ${TOP_N})`, topCandidates);
-
-  const topReasons = topStrings(entries, (e) => e?.reason || null, TOP_N);
-  printTable(`top reason strings (top ${TOP_N})`, topReasons);
-
-  const last = entries[total - 1] || null;
-  const lastSummary = summarizeLast(last);
-  console.log("\nlast entry summary");
-  console.log(lastSummary ? `  ${lastSummary}` : "  (none)");
+  result.topReasons = topStrings(entries, (e) => e?.reason || null, TOP_N);
+  result.last = entries[entries.length - 1] || null;
+  result.ok = true;
+  return result;
 }
 
-main();
+export function formatLedgerSummary(summary, options = {}) {
+  const compact = options.compact === true;
+  const lines = [];
+  const total = summary?.total ?? 0;
+
+  if (summary?.error) {
+    if (compact) return `📒 Ledger\n\n${summary.error}`;
+    return `Ledger error: ${summary.error}`;
+  }
+
+  if (!summary || total === 0) {
+    if (compact) return "📒 Ledger\n\nNo ledger entries found.";
+    return "Decision Ledger Summary\nNo entries to summarize.";
+  }
+
+  const firstTs = summary.firstTs ?? "(none)";
+  const lastTs = summary.lastTs ?? "(none)";
+  const lastSummary = summarizeLast(summary.last);
+
+  if (compact) {
+    lines.push("📒 Decision Ledger");
+    lines.push(`entries: ${total}`);
+    lines.push(`first: ${firstTs}`);
+    lines.push(`last:  ${lastTs}`);
+    if (summary.byResult?.length) {
+      lines.push("");
+      lines.push("by result:");
+      for (const [label, count] of summary.byResult.slice(0, TOP_N)) {
+        lines.push(`  ${count}x ${label}`);
+      }
+    }
+    if (summary.byMode?.length) {
+      lines.push("");
+      lines.push("by mode:");
+      for (const [label, count] of summary.byMode.slice(0, TOP_N)) {
+        lines.push(`  ${count}x ${label}`);
+      }
+    }
+    if (summary.topCandidates?.length) {
+      lines.push("");
+      lines.push("top candidates:");
+      for (const [label, count] of summary.topCandidates) {
+        lines.push(`  ${count}x ${label}`);
+      }
+    }
+    if (summary.topReasons?.length) {
+      lines.push("");
+      lines.push("top reasons:");
+      for (const [label, count] of summary.topReasons) {
+        const trimmed = label.length > 80 ? label.slice(0, 77) + "..." : label;
+        lines.push(`  ${count}x ${trimmed}`);
+      }
+    }
+    if (lastSummary) {
+      lines.push("");
+      lines.push("last entry:");
+      lines.push(`  ${lastSummary}`);
+    }
+    return lines.join("\n");
+  }
+
+  // Default: CLI-style multi-line table
+  lines.push("Decision Ledger Summary");
+  lines.push(`path: ${summary.path ?? "(unknown)"}`);
+  lines.push(`total entries: ${total}`);
+  lines.push(`first timestamp: ${firstTs}`);
+  lines.push(`last timestamp:  ${lastTs}`);
+
+  const block = (title, rows) => {
+    lines.push("");
+    lines.push(title);
+    if (!rows || rows.length === 0) {
+      lines.push("  (none)");
+      return;
+    }
+    for (const [label, count] of rows) {
+      lines.push(`  ${count.toString().padStart(4)}  ${label}`);
+    }
+  };
+  block("count by result", summary.byResult);
+  block("count by mode", summary.byMode);
+  block(`top bestCandidate names (top ${TOP_N})`, summary.topCandidates);
+  block(`top reason strings (top ${TOP_N})`, summary.topReasons);
+  lines.push("");
+  lines.push("last entry summary");
+  lines.push(lastSummary ? `  ${lastSummary}` : "  (none)");
+  return lines.join("\n");
+}
+
+function main() {
+  const summary = summarizeLedger();
+  console.log(formatLedgerSummary(summary));
+  if (summary.error) {
+    console.log("\nNothing to summarize.");
+  }
+}
+
+const isMain = (() => {
+  try {
+    return process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  main();
+}

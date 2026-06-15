@@ -87,6 +87,8 @@ const {
   EXECUTION_MODES,
 } = await import("../execution-modes.js");
 
+const { classifyTokenRisk, formatTokenRiskSummary } = await import("../token-risk.js");
+
 // ─── Run tests ─────────────────────────────────────────────────
 console.log("\n=== Phase 1 Safety Invariant Tests ===\n");
 
@@ -897,6 +899,96 @@ test("Telegram read-only guard runs before fallback free-text agentLoop", () => 
     "Telegram read-only guard must run before fallback free-text agentLoop inside telegramHandler"
   );
 });
+
+// ─── Group 11: Token risk classifier (token-risk.js) ───────────────────────────────
+
+console.log("\nGroup 11: Token risk classifier\n");
+
+const WSOL_MINT = "So11111111111111111111111111111111111111112";
+const FAKE_MINT = "EvilMint11111111111111111111111111111111111111";
+
+function mkPool(overrides) {
+  return {
+    pool: {
+      base: { symbol: "X", mint: WSOL_MINT },
+      quote: { symbol: "WSOL", mint: WSOL_MINT },
+      ...overrides.pool,
+    },
+    ti: {
+      audit: { mint_disabled: true, freeze_disabled: true, bot_holders_pct: 1, top_holders_pct: 5 },
+      ...overrides.ti,
+    },
+  };
+}
+
+test("token-risk: rugpull => BLOCK", () => {
+  const r = classifyTokenRisk(mkPool({ pool: { is_rugpull: true } }));
+  assert.strictEqual(r.status, "BLOCK");
+  assert.ok(r.reasons.some(x => /rugpull/i.test(x)), "should mention rugpull");
+});
+
+test("token-risk: wash => BLOCK", () => {
+  const r = classifyTokenRisk(mkPool({ pool: { is_wash: true } }));
+  assert.strictEqual(r.status, "BLOCK");
+  assert.ok(r.reasons.some(x => /wash/i.test(x)), "should mention wash");
+});
+
+test("token-risk: active mint authority => BLOCK", () => {
+  const r = classifyTokenRisk(mkPool({ ti: { audit: { mint_disabled: false, freeze_disabled: true, bot_holders_pct: 0, top_holders_pct: 0 } } }));
+  assert.strictEqual(r.status, "BLOCK");
+  assert.ok(r.reasons.some(x => /mint authority/i.test(x)), "should mention mint authority");
+});
+
+test("token-risk: missing base mint => WARN or UNKNOWN, never PASS/BLOCK", () => {
+  const candidate = {
+    pool: { base: { symbol: "X" } },
+    ti: { audit: { mint_disabled: true, freeze_disabled: true, bot_holders_pct: 0, top_holders_pct: 0 } },
+  };
+  const r = classifyTokenRisk(candidate);
+  assert.ok(r.status === "WARN" || r.status === "UNKNOWN", "expected WARN or UNKNOWN, got " + r.status);
+  assert.notStrictEqual(r.status, "PASS");
+  assert.notStrictEqual(r.status, "BLOCK");
+});
+
+test("token-risk: clean WSOL identity with full data => PASS or UNKNOWN, never BLOCK", () => {
+  const r = classifyTokenRisk(mkPool({}));
+  assert.notStrictEqual(r.status, "BLOCK");
+  assert.ok(r.status === "PASS" || r.status === "UNKNOWN", "expected PASS or UNKNOWN, got " + r.status);
+  assert.strictEqual(r.identity.baseSymbol, "X");
+  assert.strictEqual(r.identity.baseMint, WSOL_MINT);
+  assert.strictEqual(r.identity.copycatRisk, false);
+});
+
+test("token-risk: SOL symbol with wrong mint => BLOCK + copycatRisk", () => {
+  const candidate = {
+    pool: { base: { symbol: "SOL", mint: FAKE_MINT } },
+    ti: { audit: { mint_disabled: true, freeze_disabled: true, bot_holders_pct: 0, top_holders_pct: 0 } },
+  };
+  const r = classifyTokenRisk(candidate);
+  assert.strictEqual(r.status, "BLOCK");
+  assert.strictEqual(r.identity.copycatRisk, true);
+  assert.ok(r.reasons.some(x => /symbol SOL|copycat|canonical/i.test(x)));
+});
+
+test("token-risk: clean known WSOL with full risk data => PASS", () => {
+  const r = classifyTokenRisk({
+    pool: { base: { symbol: "WSOL", mint: WSOL_MINT } },
+    ti: { audit: { mint_disabled: true, freeze_disabled: true, bot_holders_pct: 1, top_holders_pct: 5 } },
+  });
+  assert.strictEqual(r.status, "PASS");
+  assert.strictEqual(r.identity.copycatRisk, false);
+  assert.deepStrictEqual(r.reasons, []);
+  assert.deepStrictEqual(r.warnings, []);
+});
+
+test("token-risk: formatTokenRiskSummary returns a string with status tag", () => {
+  const r = classifyTokenRisk(mkPool({ pool: { is_rugpull: true } }));
+  const s = formatTokenRiskSummary(r);
+  assert.strictEqual(typeof s, "string");
+  assert.ok(s.includes("[BLOCK]"), "summary should include status tag");
+  assert.ok(s.toLowerCase().includes("rugpull"), "summary should mention rugpull");
+});
+
 
 restoreEnv();
 

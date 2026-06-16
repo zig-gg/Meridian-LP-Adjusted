@@ -78,6 +78,22 @@ function summarizeLast(entry) {
   if (entry.mode != null) parts.push(`mode=${entry.mode}`);
   if (entry.bestCandidate) parts.push(`bestCandidate=${entry.bestCandidate}`);
   if (entry.reason) parts.push(`reason=${String(entry.reason).slice(0, 160)}`);
+
+  // tokenRisk summary for last entry
+  const tr = entry?.tokenRisk;
+  if (tr && typeof tr === "object") {
+    const status = tr.status || "UNKNOWN";
+    const identity = tr.identity || {};
+    const sym = identity.baseSymbol || "?";
+    const mint = identity.baseMint ? identity.baseMint.slice(0, 8) + ".." : "?";
+    const copycat = identity.copycatRisk ? " copycat" : "";
+    parts.push(`tokenRisk=[${status}] ${sym} (${mint})${copycat}`);
+    const reasons = (tr.reasons || []).slice(0, 3);
+    const warnings = (tr.warnings || []).slice(0, 3);
+    if (reasons.length > 0) parts.push(`reasons=${reasons.join("; ")}`);
+    if (warnings.length > 0) parts.push(`warnings=${warnings.join("; ")}`);
+  }
+
   return parts.join(" | ");
 }
 
@@ -184,6 +200,22 @@ export function formatLedgerSummary(summary, options = {}) {
       lines.push("last entry:");
       lines.push(`  ${lastSummary}`);
     }
+    // tokenRisk from last entry
+    const tr = summary.last?.tokenRisk;
+    if (tr && typeof tr === "object") {
+      lines.push("");
+      lines.push("token risk:");
+      const identity = tr.identity || {};
+      const status = tr.status || "UNKNOWN";
+      const sym = identity.baseSymbol || "?";
+      const mint = identity.baseMint ? identity.baseMint.slice(0, 8) + ".." : "?";
+      const copycat = identity.copycatRisk ? " copycat=true" : "";
+      lines.push(`  status=${status} ${sym} (${mint})${copycat}`);
+      const reasons = (tr.reasons || []).slice(0, 3);
+      const warnings = (tr.warnings || []).slice(0, 3);
+      if (reasons.length > 0) lines.push(`  reasons=${reasons.join("; ")}`);
+      if (warnings.length > 0) lines.push(`  warnings=${warnings.join("; ")}`);
+    }
     return lines.join("\n");
   }
 
@@ -212,6 +244,24 @@ export function formatLedgerSummary(summary, options = {}) {
   lines.push("");
   lines.push("last entry summary");
   lines.push(lastSummary ? `  ${lastSummary}` : "  (none)");
+
+  // tokenRisk from last entry (non-compact)
+  const tr = summary.last?.tokenRisk;
+  if (tr && typeof tr === "object") {
+    lines.push("");
+    lines.push("token risk (last entry):");
+    const identity = tr.identity || {};
+    const status = tr.status || "UNKNOWN";
+    const sym = identity.baseSymbol || "?";
+    const mint = identity.baseMint ? identity.baseMint.slice(0, 8) + ".." : "?";
+    const copycat = identity.copycatRisk ? " copycat=true" : "";
+    lines.push(`  status: ${status} | ${sym} (${mint})${copycat}`);
+    const reasons = (tr.reasons || []).slice(0, 3);
+    const warnings = (tr.warnings || []).slice(0, 3);
+    if (reasons.length > 0) lines.push(`  reasons: ${reasons.join("; ")}`);
+    if (warnings.length > 0) lines.push(`  warnings: ${warnings.join("; ")}`);
+  }
+
   return lines.join("\n");
 }
 

@@ -36,7 +36,40 @@ import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnable
 import { appendDecision } from "./decision-log.js";
 import { appendDecisionLedger, getLastLedgerWrite, getLedgerPath, getLedgerStats } from "./decision-ledger.js";
 import { summarizeLedger, formatLedgerSummary } from "./scripts/summarize-ledger.js";
+import { classifyTokenRisk } from "./token-risk.js";
 import { runConfigDoctor } from "./scripts/config-doctor.js";
+
+// ─── Token risk helpers (read-only) ──────────────────────────────────────────────
+// Truncate tokenRisk for ledger/summary payloads. We never include full
+// signal blobs — just the status, identity fields, and up to 3 reasons/warnings.
+function trimTokenRisk(risk) {
+  if (!risk || typeof risk !== "object") return null;
+  const identity = risk.identity || {};
+  return {
+    status: risk.status || "UNKNOWN",
+    identity: {
+      baseSymbol: identity.baseSymbol || null,
+      baseMint: identity.baseMint || null,
+      copycatRisk: identity.copycatRisk === true,
+    },
+    reasons: Array.isArray(risk.reasons) ? risk.reasons.slice(0, 3) : [],
+    warnings: Array.isArray(risk.warnings) ? risk.warnings.slice(0, 3) : [],
+  };
+}
+
+// Classify a passing candidate for read-only reporting. Always returns a
+// tokenRisk object — UNKNOWN when the candidate has no pool/tokenInfo data.
+function classifyCandidateRisk(candidate) {
+  if (!candidate) return { status: "UNKNOWN", identity: { baseSymbol: null, baseMint: null, copycatRisk: false }, reasons: [], warnings: [] };
+  let risk;
+  try {
+    risk = classifyTokenRisk(candidate);
+  } catch (_e) {
+    risk = { status: "UNKNOWN", identity: { baseSymbol: null, baseMint: null, copycatRisk: false }, reasons: ["classifier_error"], warnings: [] };
+  }
+  return trimTokenRisk(risk);
+}
+
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
 const isMain = entrypointPath
@@ -1372,6 +1405,12 @@ function buildScreeningSummary({ screenReport, passing, filteredOut, earlyFilter
     hiveMind: isHiveMindEnabled(),
   };
 
+  // Ops-7.2: read-only tokenRisk visibility for the in-memory summary.
+  // We only classify when we have an actual candidate object; otherwise we
+  // emit UNKNOWN rather than a safe verdict.
+  const bestCandidateRisk = best ? classifyCandidateRisk(best) : { status: "UNKNOWN", identity: { baseSymbol: null, baseMint: null, copycatRisk: false }, reasons: [], warnings: [] };
+  const top = Array.isArray(passing) ? passing.slice(0, 5) : [];
+  const topCandidateRisk = top.map((c) => classifyCandidateRisk(c));
   return {
     result: resultType,
     bestCandidate,
@@ -1380,6 +1419,8 @@ function buildScreeningSummary({ screenReport, passing, filteredOut, earlyFilter
     apiErrorCount: "not tracked",
     candidatesCacheCount: Array.isArray(_latestCandidates) ? _latestCandidates.length : 0,
     safetyFlags,
+    tokenRisk: bestCandidateRisk,
+    topTokenRisk: topCandidateRisk,
   };
 }
 
@@ -2133,6 +2174,31 @@ async function telegramHandler(msg) {
         screeningSummaryBlock = "\nLast screening: no cycle summary recorded yet.";
       }
 
+      // Ops-7.2: read-only token-risk visibility for /report.
+      // Pulls tokenRisk from the in-memory screening summary. Never
+      // mutates candidates, never affects filtering or deploy logic.
+      const tokenRisk = screeningSummary?.tokenRisk || null;
+      let tokenRiskBlock = "";
+      if (tokenRisk && typeof tokenRisk === "object") {
+        const identity = tokenRisk.identity || {};
+        const status = tokenRisk.status || "UNKNOWN";
+        const sym = identity.baseSymbol || "?";
+        const mint = identity.baseMint
+          ? identity.baseMint.slice(0, 4) + "…" + identity.baseMint.slice(-4)
+          : "no-mint";
+        const copycat = identity.copycatRisk === true ? " [COPYCAT]" : "";
+        const lines = [
+          "⚠️ Token risk: [" + status + "] " + sym + " (" + mint + ")" + copycat,
+        ];
+        const reasons = Array.isArray(tokenRisk.reasons) ? tokenRisk.reasons.slice(0, 3) : [];
+        const warnings = Array.isArray(tokenRisk.warnings) ? tokenRisk.warnings.slice(0, 3) : [];
+        if (reasons.length > 0) lines.push("  Reasons: " + reasons.join("; "));
+        if (warnings.length > 0) lines.push("  Warnings: " + warnings.join("; "));
+        tokenRiskBlock = lines.join("\n");
+      } else {
+        tokenRiskBlock = "⚠️ Token risk: UNKNOWN";
+      }
+
       // Decision ledger info (read-only)
       const ledgerStats = getLedgerStats();
       const ledgerBlock = [
@@ -2172,6 +2238,8 @@ async function telegramHandler(msg) {
         `🕒 Cache age: ${staleness.ageText}`,
         `⚠️ Stale: ${staleness.stale ? `yes (${staleness.reason})` : "no"}`,
         screeningSummaryBlock,
+        "",
+        tokenRiskBlock,
         ledgerBlock,
         "",
         `🛡️  Wallet readiness: ${readiness.ready ? "READY" : "NOT READY"}`,

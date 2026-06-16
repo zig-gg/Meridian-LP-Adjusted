@@ -517,6 +517,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
         candidateCount: 0,
         candidatesCacheCount: _latestCandidates.length,
         apiErrorCount: "not tracked",
+        tokenRisk: classifyCandidateRisk(null),
+        topTokenRisk: [],
         safetyFlags: {
           executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
           dryRun: process.env.DRY_RUN === "true",
@@ -548,6 +550,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
         candidateCount: 0,
         candidatesCacheCount: _latestCandidates.length,
         apiErrorCount: "not tracked",
+        tokenRisk: classifyCandidateRisk(null),
+        topTokenRisk: [],
         safetyFlags: {
           executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
           dryRun: process.env.DRY_RUN === "true",
@@ -571,6 +575,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
       candidateCount: 0,
       candidatesCacheCount: _latestCandidates.length,
       apiErrorCount: "not tracked",
+      tokenRisk: classifyCandidateRisk(null),
+      topTokenRisk: [],
       safetyFlags: {
         executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
         dryRun: process.env.DRY_RUN === "true",
@@ -679,6 +685,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
           candidateCount: 0,
           candidatesCacheCount: allCandidates.length,
           apiErrorCount: "not tracked",
+          tokenRisk: classifyCandidateRisk(null),
+          topTokenRisk: [],
           safetyFlags: {
             executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
             dryRun: process.env.DRY_RUN === "true",
@@ -736,6 +744,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
           candidateCount: 1,
           candidatesCacheCount: allCandidates.length,
           apiErrorCount: "not tracked",
+          tokenRisk: classifyCandidateRisk(passing[0]),
+          topTokenRisk: [classifyCandidateRisk(passing[0])],
           safetyFlags: {
             executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
             dryRun: process.env.DRY_RUN === "true",
@@ -865,6 +875,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
         candidateCount: passing.length,
         candidatesCacheCount: allCandidates.length,
         apiErrorCount: "not tracked",
+        tokenRisk: classifyCandidateRisk(passing[0]),
+        topTokenRisk: passing.slice(0, 5).map((c) => classifyCandidateRisk(c)),
         safetyFlags: {
           executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
           dryRun: process.env.DRY_RUN === "true",
@@ -996,6 +1008,8 @@ IMPORTANT:
         candidateCount: passing.length,
         candidatesCacheCount: allCandidates.length,
         apiErrorCount: "not tracked",
+        tokenRisk: classifyCandidateRisk(passing[0]),
+        topTokenRisk: passing.slice(0, 5).map((c) => classifyCandidateRisk(c)),
         safetyFlags: {
           executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
           dryRun: process.env.DRY_RUN === "true",
@@ -1029,6 +1043,8 @@ IMPORTANT:
         candidateCount: passing.length,
         candidatesCacheCount: allCandidates.length,
         apiErrorCount: "not tracked",
+        tokenRisk: classifyCandidateRisk(passing[0]),
+        topTokenRisk: passing.slice(0, 5).map((c) => classifyCandidateRisk(c)),
         safetyFlags: {
           executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
           dryRun: process.env.DRY_RUN === "true",
@@ -1051,6 +1067,8 @@ IMPORTANT:
       candidateCount: 0,
       candidatesCacheCount: _latestCandidates.length,
       apiErrorCount: "not tracked",
+      tokenRisk: classifyCandidateRisk(null),
+      topTokenRisk: [],
       safetyFlags: {
         executionMode: process.env.EXECUTION_MODE || config.execution?.mode || "scanner",
         dryRun: process.env.DRY_RUN === "true",

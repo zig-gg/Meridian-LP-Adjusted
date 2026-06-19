@@ -627,6 +627,8 @@ export async function runScreeningCycle(triggerSource = "cron") {
   } else {
     log("cron", `Starting screening cycle [LLM disabled] [cycleId: ${cycleId}]`);
   }
+  // Declared here so it's accessible in both the inner try and inner catch
+  let apiErrorCount = 0;
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
@@ -644,6 +646,7 @@ export async function runScreeningCycle(triggerSource = "cron") {
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
     if (topCandidates) setLatestCandidates(candidates);
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
+    apiErrorCount = topCandidates?.api_health?.UNAVAILABLE ?? 0;
 
     const allCandidates = [];
     for (const pool of candidates) {
@@ -714,7 +717,7 @@ export async function runScreeningCycle(triggerSource = "cron") {
           rejected: combined.slice(0, 5).map((e) => ({ name: e.name, reason: e.reason })),
           candidateCount: 0,
           candidatesCacheCount: allCandidates.length,
-          apiErrorCount: "not tracked",
+          apiErrorCount,
           tokenRisk: classifyCandidateRisk(null),
           topTokenRisk: [],
           safetyFlags: {
@@ -775,7 +778,7 @@ export async function runScreeningCycle(triggerSource = "cron") {
           rejected: [{ name: candidateName, reason: skipReason }],
           candidateCount: 1,
           candidatesCacheCount: allCandidates.length,
-          apiErrorCount: "not tracked",
+          apiErrorCount,
           tokenRisk: classifyCandidateRisk(passing[0]),
           topTokenRisk: [classifyCandidateRisk(passing[0])],
           safetyFlags: {
@@ -908,7 +911,7 @@ export async function runScreeningCycle(triggerSource = "cron") {
         rejected: rejectedForLedger,
         candidateCount: passing.length,
         candidatesCacheCount: allCandidates.length,
-        apiErrorCount: "not tracked",
+        apiErrorCount,
         tokenRisk: classifyCandidateRisk(passing[0]),
         topTokenRisk: passing.slice(0, 5).map((c) => classifyCandidateRisk(c)),
         safetyFlags: {
@@ -1043,7 +1046,7 @@ IMPORTANT:
         rejected: [],
         candidateCount: passing.length,
         candidatesCacheCount: allCandidates.length,
-        apiErrorCount: "not tracked",
+        apiErrorCount,
         tokenRisk: classifyCandidateRisk(passing[0]),
         topTokenRisk: passing.slice(0, 5).map((c) => classifyCandidateRisk(c)),
         safetyFlags: {
@@ -1080,7 +1083,7 @@ IMPORTANT:
         rejected: [],
         candidateCount: passing.length,
         candidatesCacheCount: allCandidates.length,
-        apiErrorCount: "not tracked",
+        apiErrorCount,
         tokenRisk: classifyCandidateRisk(passing[0]),
         topTokenRisk: passing.slice(0, 5).map((c) => classifyCandidateRisk(c)),
         safetyFlags: {
@@ -1106,7 +1109,7 @@ IMPORTANT:
       reason: `Screening cycle failed: ${error.message}`,
       candidateCount: 0,
       candidatesCacheCount: _latestCandidates.length,
-      apiErrorCount: "not tracked",
+      apiErrorCount,
       tokenRisk: classifyCandidateRisk(null),
       topTokenRisk: [],
       safetyFlags: {

@@ -1136,6 +1136,154 @@ test("index.js passes node --check after Ops-8.1 edits", () => {
   execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+// ── Group 13: Ops-8.2 Data Provenance ────────────────────────────────────────
+
+console.log("\nGroup 13: Ops-8.2 Data Provenance\n");
+
+test("tools/screening.js: api_health object is initialised in getTopCandidates", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  const fnIdx = content.indexOf("export async function getTopCandidates(");
+  assert.ok(fnIdx >= 0, "getTopCandidates must be exported");
+  const fnEnd = content.indexOf("\nexport async function ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 8000);
+  assert.ok(fnBody.includes("const api_health = {"), "api_health object must be initialised");
+});
+
+test("tools/screening.js: api_health has all five required counters", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  const fnIdx = content.indexOf("export async function getTopCandidates(");
+  const fnEnd = content.indexOf("\nexport async function ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 8000);
+  const initIdx = fnBody.indexOf("const api_health = {");
+  assert.ok(initIdx >= 0, "api_health must be initialised");
+  const initBlock = fnBody.slice(initIdx, fnBody.indexOf("};", initIdx) + 2);
+  assert.ok(initBlock.includes("AVAILABLE"), "api_health must have AVAILABLE counter");
+  assert.ok(initBlock.includes("NOT_QUERIED"), "api_health must have NOT_QUERIED counter");
+  assert.ok(initBlock.includes("UNAVAILABLE"), "api_health must have UNAVAILABLE counter");
+  assert.ok(initBlock.includes("MISSING"), "api_health must have MISSING counter");
+  assert.ok(initBlock.includes("NEGATIVE_SIGNAL"), "api_health must have NEGATIVE_SIGNAL counter");
+});
+
+test("tools/screening.js: NOT_QUERIED is tallied when !p.base?.mint", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  // The guard for missing mint must increment NOT_QUERIED
+  assert.ok(
+    content.includes("api_health.NOT_QUERIED++"),
+    "api_health.NOT_QUERIED must be incremented when base mint is missing"
+  );
+  // It must appear inside the !p.base?.mint guard
+  const notQueriedIdx = content.indexOf("api_health.NOT_QUERIED++");
+  const guard = content.slice(Math.max(0, notQueriedIdx - 150), notQueriedIdx + 30);
+  assert.ok(
+    guard.includes("!p.base?.mint") || guard.includes("!p.base"),
+    "NOT_QUERIED increment must be guarded by !p.base?.mint check"
+  );
+});
+
+test("tools/screening.js: UNAVAILABLE is tallied for rejected OKX promise slots", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  assert.ok(
+    content.includes("api_health.UNAVAILABLE++"),
+    "api_health.UNAVAILABLE must be incremented for rejected OKX calls"
+  );
+  // Each of the four OKX calls (adv, price, clusters, risk) must have UNAVAILABLE++
+  const unavailableCount = (content.match(/api_health\.UNAVAILABLE\+\+/g) || []).length;
+  assert.ok(unavailableCount >= 4, `UNAVAILABLE must be tallied for all 4 OKX calls, found ${unavailableCount}`);
+});
+
+test("tools/screening.js: AVAILABLE is tallied for fulfilled OKX promise slots", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  assert.ok(
+    content.includes("api_health.AVAILABLE++"),
+    "api_health.AVAILABLE must be incremented for fulfilled OKX calls"
+  );
+  const availableCount = (content.match(/api_health\.AVAILABLE\+\+/g) || []).length;
+  assert.ok(availableCount >= 4, `AVAILABLE must be tallied for all 4 OKX calls, found ${availableCount}`);
+});
+
+test("tools/screening.js: NEGATIVE_SIGNAL is tallied for is_rugpull and is_wash", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  assert.ok(
+    content.includes("api_health.NEGATIVE_SIGNAL++"),
+    "api_health.NEGATIVE_SIGNAL must be incremented"
+  );
+  // Both signals must be tallied
+  const negCount = (content.match(/api_health\.NEGATIVE_SIGNAL\+\+/g) || []).length;
+  assert.ok(negCount >= 2, `NEGATIVE_SIGNAL must be tallied for both is_rugpull and is_wash, found ${negCount}`);
+  // The increments must appear near is_rugpull and is_wash
+  const negIdx = content.indexOf("api_health.NEGATIVE_SIGNAL++");
+  const negWindow = content.slice(Math.max(0, negIdx - 300), negIdx + 100);
+  assert.ok(
+    negWindow.includes("is_rugpull") || negWindow.includes("is_wash"),
+    "NEGATIVE_SIGNAL increments must be near is_rugpull / is_wash assignments"
+  );
+});
+
+test("tools/screening.js: api_health is returned in getTopCandidates result", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  const fnIdx = content.indexOf("export async function getTopCandidates(");
+  const fnEnd = content.indexOf("\nexport async function ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 8000);
+  // The return statement must include api_health
+  const returnIdx = fnBody.lastIndexOf("return {");
+  assert.ok(returnIdx >= 0, "getTopCandidates must have a return statement");
+  const returnBlock = fnBody.slice(returnIdx, fnBody.indexOf("};", returnIdx) + 2);
+  assert.ok(returnBlock.includes("api_health"), "getTopCandidates return must include api_health");
+});
+
+test("index.js: api_health is extracted from topCandidates response", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Must extract apiErrorCount from topCandidates?.api_health?.UNAVAILABLE
+  assert.ok(
+    content.includes("topCandidates?.api_health?.UNAVAILABLE"),
+    "index.js must extract UNAVAILABLE count from topCandidates.api_health"
+  );
+});
+
+test("index.js: apiErrorCount variable is declared and assigned from api_health", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Declaration must exist (let, before the inner try)
+  assert.ok(
+    content.includes("let apiErrorCount = 0;"),
+    "apiErrorCount must be declared as let before the inner try block"
+  );
+  // Assignment must point to api_health.UNAVAILABLE
+  assert.ok(
+    content.includes("topCandidates?.api_health?.UNAVAILABLE"),
+    "apiErrorCount must be assigned from topCandidates?.api_health?.UNAVAILABLE"
+  );
+  // Assignment must come after the getTopCandidates call
+  const getTopIdx = content.indexOf("getTopCandidates({ limit:");
+  assert.ok(getTopIdx >= 0, "getTopCandidates call must exist");
+  const assignIdx = content.indexOf("topCandidates?.api_health?.UNAVAILABLE", getTopIdx);
+  assert.ok(assignIdx > getTopIdx, "apiErrorCount must be assigned after the getTopCandidates call");
+});
+
+test("index.js: no appendDecisionLedger call inside runScreeningCycle uses apiErrorCount: \"not tracked\" after fetch", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Bound the search to inside runScreeningCycle — from the getTopCandidates call
+  // to the startCronJobs export (the next top-level function after runScreeningCycle).
+  const getTopIdx = content.indexOf("const topCandidates = await getTopCandidates(");
+  assert.ok(getTopIdx >= 0, "getTopCandidates call must exist");
+  const cronJobsIdx = content.indexOf("export function startCronJobs()", getTopIdx);
+  assert.ok(cronJobsIdx > getTopIdx, "startCronJobs must follow runScreeningCycle");
+  // Only examine inside runScreeningCycle after the fetch
+  const innerRegion = content.slice(getTopIdx, cronJobsIdx);
+  const notTrackedCount = (innerRegion.match(/apiErrorCount:\s*"not tracked"/g) || []).length;
+  assert.ok(
+    notTrackedCount === 0,
+    `All appendDecisionLedger calls inside runScreeningCycle after getTopCandidates must use the real apiErrorCount, found ${notTrackedCount} remaining "not tracked" occurrences`
+  );
+});
+
+test("tools/screening.js passes node --check after Ops-8.2 edits", () => {
+  execSync("node --check tools/screening.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
+test("index.js passes node --check after Ops-8.2 edits", () => {
+  execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
 
 console.log(`\n${"─".repeat(50)}`);

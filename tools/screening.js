@@ -612,12 +612,26 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     }
   }
 
+  // ── OKX api_health provenance counter ──────────────────────────────────────
+  // Tracks per-call outcomes across the eligible pool set so the caller can
+  // report a concrete UNAVAILABLE count rather than "not tracked".
+  const api_health = {
+    AVAILABLE: 0,
+    NOT_QUERIED: 0,
+    UNAVAILABLE: 0,
+    MISSING: 0,
+    NEGATIVE_SIGNAL: 0,
+  };
+
   // Enrich with OKX data — advanced info (risk/bundle/sniper) + ATH price (no API key required)
   if (eligible.length > 0) {
     const { getAdvancedInfo, getPriceInfo, getClusterList, getRiskFlags } = await import("./okx.js");
     const okxResults = await Promise.allSettled(
       eligible.map(async (p) => {
-        if (!p.base?.mint) return { adv: null, price: null, clusters: [], risk: null };
+        if (!p.base?.mint) {
+          api_health.NOT_QUERIED++;
+          return { adv: null, price: null, clusters: [], risk: null };
+        }
         const [adv, price, clusters, risk] = await Promise.allSettled([
           getAdvancedInfo(p.base.mint),
           getPriceInfo(p.base.mint),
@@ -626,10 +640,10 @@ export async function getTopCandidates({ limit = 10 } = {}) {
         ]);
 
         const mintShort = p.base.mint.slice(0, 8);
-        if (adv.status !== "fulfilled")      log("okx", `advanced-info unavailable for ${p.name} (${mintShort})`);
-        if (price.status !== "fulfilled")    log("okx", `price-info unavailable for ${p.name} (${mintShort})`);
-        if (clusters.status !== "fulfilled") log("okx", `cluster-list unavailable for ${p.name} (${mintShort})`);
-        if (risk.status !== "fulfilled")     log("okx", `risk-check unavailable for ${p.name} (${mintShort})`);
+        if (adv.status !== "fulfilled")      { log("okx", `advanced-info unavailable for ${p.name} (${mintShort})`);  api_health.UNAVAILABLE++; } else { api_health.AVAILABLE++; }
+        if (price.status !== "fulfilled")    { log("okx", `price-info unavailable for ${p.name} (${mintShort})`);     api_health.UNAVAILABLE++; } else { api_health.AVAILABLE++; }
+        if (clusters.status !== "fulfilled") { log("okx", `cluster-list unavailable for ${p.name} (${mintShort})`);   api_health.UNAVAILABLE++; } else { api_health.AVAILABLE++; }
+        if (risk.status !== "fulfilled")     { log("okx", `risk-check unavailable for ${p.name} (${mintShort})`);      api_health.UNAVAILABLE++; } else { api_health.AVAILABLE++; }
 
         return {
           adv: adv.status === "fulfilled" ? adv.value : null,
@@ -657,6 +671,9 @@ export async function getTopCandidates({ limit = 10 } = {}) {
       if (risk) {
         eligible[i].is_rugpull = risk.is_rugpull;
         eligible[i].is_wash    = risk.is_wash;
+        // Tally negative signals for provenance reporting
+        if (risk.is_rugpull) api_health.NEGATIVE_SIGNAL++;
+        if (risk.is_wash)    api_health.NEGATIVE_SIGNAL++;
       }
       if (price) {
         eligible[i].price_vs_ath_pct = price.price_vs_ath_pct;
@@ -753,6 +770,7 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     candidates: eligible,
     total_screened: pools.length,
     filtered_examples: filteredOut.slice(0, 3),
+    api_health,
   };
 }
 

@@ -990,6 +990,152 @@ test("token-risk: formatTokenRiskSummary returns a string with status tag", () =
 });
 
 
+// ── Group 12: Ops-8.1 Cycle and Cache Truthfulness ───────────────────────────
+
+console.log("\nGroup 12: Ops-8.1 Cycle and Cache Truthfulness\n");
+
+test("index.js: runScreeningCycle accepts triggerSource param (not {silent})", () => {
+  const content = readFileSync("index.js", "utf8");
+  // New signature must use triggerSource as a positional param
+  assert.ok(
+    content.includes("runScreeningCycle(triggerSource = \"cron\")"),
+    "runScreeningCycle must accept triggerSource positional param with default \"cron\""
+  );
+});
+
+test("index.js: skipped_busy is logged to stdout only (console.log), not appendDecisionLedger", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Find the busy guard block — it must use console.log, not appendDecisionLedger
+  const busyGuardIdx = content.indexOf("skipped_busy");
+  assert.ok(busyGuardIdx >= 0, "index.js must contain skipped_busy event label");
+  // The console.log must come BEFORE the next appendDecisionLedger after the guard
+  const nextLedgerIdx = content.indexOf("appendDecisionLedger", busyGuardIdx);
+  // The guard block exits (return null) before any ledger call
+  const returnNullIdx = content.indexOf("return null;", busyGuardIdx);
+  assert.ok(returnNullIdx < nextLedgerIdx, "skipped_busy guard must return null before any appendDecisionLedger call");
+});
+
+test("index.js: skipped_busy log payload contains attemptId and triggerSource keys", () => {
+  const content = readFileSync("index.js", "utf8");
+  const busyGuardIdx = content.indexOf("skipped_busy");
+  assert.ok(busyGuardIdx >= 0, "skipped_busy must be present");
+  // The JSON payload must include both keys
+  const busyLine = content.slice(busyGuardIdx - 200, busyGuardIdx + 200);
+  assert.ok(busyLine.includes("attemptId"), "skipped_busy log must include attemptId");
+  assert.ok(busyLine.includes("triggerSource"), "skipped_busy log must include triggerSource");
+});
+
+test("index.js: cycleId is generated after lock acquired", () => {
+  const content = readFileSync("index.js", "utf8");
+  // cycleId must be declared after _screeningBusy = true
+  const lockIdx = content.indexOf("_screeningBusy = true;");
+  assert.ok(lockIdx >= 0, "lock must be set");
+  const cycleIdIdx = content.indexOf("const cycleId =", lockIdx);
+  assert.ok(cycleIdIdx > lockIdx, "cycleId must be assigned after lock is acquired");
+});
+
+test("index.js: startedAt is recorded at cycle start", () => {
+  const content = readFileSync("index.js", "utf8");
+  const lockIdx = content.indexOf("_screeningBusy = true;");
+  const startedAtIdx = content.indexOf("const startedAt =", lockIdx);
+  assert.ok(startedAtIdx > lockIdx, "startedAt must be assigned after lock is acquired");
+});
+
+test("index.js: cycleMeta helper produces cycleId, triggerSource, startedAt, finishedAt, durationMs, outcome", () => {
+  const content = readFileSync("index.js", "utf8");
+  assert.ok(content.includes("function cycleMeta(outcome)"), "cycleMeta helper must be defined");
+  assert.ok(content.includes("finishedAt"), "cycleMeta must compute finishedAt");
+  assert.ok(content.includes("durationMs"), "cycleMeta must compute durationMs");
+  // All fields must be in the return object
+  const cycleFnIdx = content.indexOf("function cycleMeta(outcome)");
+  const cycleFnEnd = content.indexOf("}", cycleFnIdx);
+  const cycleFnBody = content.slice(cycleFnIdx, cycleFnEnd + 1);
+  assert.ok(cycleFnBody.includes("cycleId"), "cycleMeta must return cycleId");
+  assert.ok(cycleFnBody.includes("triggerSource"), "cycleMeta must return triggerSource");
+  assert.ok(cycleFnBody.includes("startedAt"), "cycleMeta must return startedAt");
+  assert.ok(cycleFnBody.includes("finishedAt"), "cycleMeta must return finishedAt");
+  assert.ok(cycleFnBody.includes("durationMs"), "cycleMeta must return durationMs");
+  assert.ok(cycleFnBody.includes("outcome"), "cycleMeta must return outcome");
+});
+
+test("index.js: appendDecisionLedger calls include ...cycleMeta() spread", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Every real ledger write (inside runScreeningCycle) must include cycleMeta spread
+  // Check that cycleMeta spread appears at least once (for skipped/error/finished paths)
+  const cycleMetaSpreadCount = (content.match(/\.\.\.cycleMeta\(/g) || []).length;
+  assert.ok(cycleMetaSpreadCount >= 5, `At least 5 appendDecisionLedger calls must spread cycleMeta, found ${cycleMetaSpreadCount}`);
+});
+
+test("index.js: appendDecisionLedger calls include outcome field", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Verify outcome key appears inside ledger payload blocks (not just in cycleMeta body)
+  const outcomeInLedger = (content.match(/outcome:\s*["'](?:finished|error)["']/g) || []).length;
+  assert.ok(outcomeInLedger >= 3, `At least 3 explicit outcome: fields in ledger payloads, found ${outcomeInLedger}`);
+});
+
+test("index.js: describeLatestCandidatesWithFreshness handles empty-but-timestamped cache", () => {
+  const content = readFileSync("index.js", "utf8");
+  const fnIdx = content.indexOf("function describeLatestCandidatesWithFreshness(limit)");
+  assert.ok(fnIdx >= 0, "describeLatestCandidatesWithFreshness must exist");
+  // Find the function body (up to next top-level function)
+  const fnEnd = content.indexOf("\nfunction ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 2000);
+  // Must check _latestCandidatesAt separately from _latestCandidates.length
+  assert.ok(
+    fnBody.includes("_latestCandidatesAt") && fnBody.includes("_latestCandidates.length"),
+    "Function must check both timestamp and array length separately"
+  );
+  // Must emit "0 candidates found" for empty-but-fresh case
+  assert.ok(
+    fnBody.includes("0 candidates found"),
+    "describeLatestCandidatesWithFreshness must report '0 candidates found' when cache is timestamped but empty"
+  );
+  // Must NOT return the 'No cached candidates yet' message for an empty-but-timestamped cache
+  // (that message is only for the no-timestamp case)
+  const noCacheMsg = "No cached candidates yet. Run /screen first.";
+  const noCacheIdx = fnBody.indexOf(noCacheMsg);
+  assert.ok(noCacheIdx >= 0, "Function must still have the 'No cached candidates yet' message for truly uncached state");
+  // Check that the "No cached candidates yet" only fires when !_latestCandidatesAt
+  const noTsGuardIdx = fnBody.indexOf("!_latestCandidatesAt");
+  assert.ok(noTsGuardIdx >= 0, "Must guard 'No cached candidates yet' behind !_latestCandidatesAt check");
+  assert.ok(noTsGuardIdx < noCacheIdx, "'No cached candidates yet' must be inside the !_latestCandidatesAt block");
+});
+
+test("scripts/summarize-ledger.js: summarizeLedger returns byOutcome field", () => {
+  const content = readFileSync("scripts/summarize-ledger.js", "utf8");
+  assert.ok(content.includes("byOutcome"), "summarizeLedger must return byOutcome field");
+  assert.ok(content.includes("countBy(entries, \"outcome\")"), "byOutcome must use countBy on outcome field");
+});
+
+test("scripts/summarize-ledger.js: summarizeLast includes cycleId, durationMs, outcome", () => {
+  const content = readFileSync("scripts/summarize-ledger.js", "utf8");
+  const fnIdx = content.indexOf("function summarizeLast(entry)");
+  assert.ok(fnIdx >= 0, "summarizeLast must exist");
+  const fnEnd = content.indexOf("\nexport function ", fnIdx);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 1500);
+  assert.ok(fnBody.includes("cycleId"), "summarizeLast must include cycleId");
+  assert.ok(fnBody.includes("durationMs"), "summarizeLast must include durationMs");
+  assert.ok(fnBody.includes("outcome"), "summarizeLast must include outcome");
+});
+
+test("scripts/summarize-ledger.js: formatLedgerSummary renders byOutcome section", () => {
+  const content = readFileSync("scripts/summarize-ledger.js", "utf8");
+  assert.ok(
+    content.includes("by outcome:") || content.includes("byOutcome"),
+    "formatLedgerSummary must render byOutcome section"
+  );
+  // CLI path must call block() for outcome
+  assert.ok(content.includes("count by outcome"), "CLI formatter must include 'count by outcome' block header");
+});
+
+test("scripts/summarize-ledger.js passes node --check", () => {
+  execSync("node --check scripts/summarize-ledger.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
+test("index.js passes node --check after Ops-8.1 edits", () => {
+  execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
 
 console.log(`\n${"─".repeat(50)}`);

@@ -41,7 +41,6 @@ logs/
 context.md
 CONTEXT.md
 dev-blocklist.json
-docs/
 
 # Discord listener queue
 discord-signals.json

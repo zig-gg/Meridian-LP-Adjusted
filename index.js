@@ -615,6 +615,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
     const topCandidates = await getTopCandidates({ limit: 10 }).catch(() => null);
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
+    if (topCandidates) setLatestCandidates(candidates);
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
 
     const allCandidates = [];

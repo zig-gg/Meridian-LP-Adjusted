@@ -487,18 +487,39 @@ After executing, write a brief one-line result per position.
   return mgmtReport;
 }
 
-export async function runScreeningCycle({ silent = false } = {}) {
+export async function runScreeningCycle(triggerSource = "cron") {
+  // Support legacy object callers: runScreeningCycle({ silent: true })
+  let _silent = false;
+  if (triggerSource && typeof triggerSource === "object") {
+    _silent = triggerSource.silent === true;
+    triggerSource = triggerSource.triggerSource || "cron";
+  }
+
+  const attemptId = `atm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+
   if (_screeningBusy) {
-    log("cron", "Screening skipped — previous cycle still running");
+    // stdout only — do NOT write skipped_busy to the ledger
+    console.log(JSON.stringify({ event: "screening_cycle_skip", outcome: "skipped_busy", attemptId, triggerSource, ts: new Date().toISOString() }));
     return null;
   }
   _screeningBusy = true; // set immediately — prevents TOCTOU race with concurrent callers
   _screeningLastTriggered = Date.now();
 
+  const cycleId = `cyc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const startedAt = new Date().toISOString();
+
+  // Helper: build the shared cycle telemetry fields for appendDecisionLedger
+  function cycleMeta(outcome) {
+    const finishedAt = new Date().toISOString();
+    const durationMs = Date.now() - new Date(startedAt).getTime();
+    return { cycleId, triggerSource, startedAt, finishedAt, durationMs, outcome };
+  }
+
   // Hard guards — don't even run the agent if preconditions aren't met
   let prePositions, preBalance;
   let liveMessage = null;
   let screenReport = null;
+  const silent = _silent;
   try {
     [prePositions, preBalance] = await Promise.all([getMyPositions({ force: true }), getWalletBalances()]);
     if (prePositions.total_positions >= config.risk.maxPositions) {
@@ -513,6 +534,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
       appendDecisionLedger({
         result: "no_deploy",
         mode: "skipped",
+        outcome: "finished",
+        ...cycleMeta("finished"),
         reason: `Max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`,
         candidateCount: 0,
         candidatesCacheCount: _latestCandidates.length,
@@ -546,6 +569,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
       appendDecisionLedger({
         result: "no_deploy",
         mode: "skipped",
+        outcome: "finished",
+        ...cycleMeta("finished"),
         reason: `Insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired})`,
         candidateCount: 0,
         candidatesCacheCount: _latestCandidates.length,
@@ -571,6 +596,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
     appendDecisionLedger({
       result: "error",
       mode: "error",
+      outcome: "error",
+      ...cycleMeta("error"),
       reason: `Screening pre-check failed: ${e.message}`,
       candidateCount: 0,
       candidatesCacheCount: _latestCandidates.length,
@@ -596,9 +623,9 @@ export async function runScreeningCycle({ silent = false } = {}) {
   timers.screeningLastRun = Date.now();
   const llmEnabled = isLlmEnabled();
   if (llmEnabled) {
-    log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
+    log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}] [cycleId: ${cycleId}]`);
   } else {
-    log("cron", "Starting screening cycle [LLM disabled]");
+    log("cron", `Starting screening cycle [LLM disabled] [cycleId: ${cycleId}]`);
   }
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
@@ -678,6 +705,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
         appendDecisionLedger({
           result: "no_deploy",
           mode: "filtered",
+          outcome: "finished",
+          ...cycleMeta("finished"),
           reason: combinedExamples || "All candidates filtered before deploy",
           bestCandidate: null,
           bestCandidatePool: null,
@@ -737,6 +766,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
         appendDecisionLedger({
           result: "no_deploy",
           mode: "single_candidate_skipped",
+          outcome: "finished",
+          ...cycleMeta("finished"),
           reason: `Single candidate skipped: ${skipReason}`,
           bestCandidate: candidateName,
           bestCandidatePool: passing[0].pool?.pool,
@@ -868,6 +899,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
       appendDecisionLedger({
         result: "no_deploy",
         mode: "deterministic_no_llm",
+        outcome: "finished",
+        ...cycleMeta("finished"),
         reason: "LLM disabled - scanner collected deterministic candidates but skipped model evaluation",
         bestCandidate: passing[0]?.pool?.name || null,
         bestCandidatePool: passing[0]?.pool?.pool || null,
@@ -995,6 +1028,8 @@ IMPORTANT:
       appendDecisionLedger({
         result: "no_deploy",
         mode: "llm",
+        outcome: "finished",
+        ...cycleMeta("finished"),
         reason: "LLM chose no deploy",
         bestCandidate: passing[0]?.pool?.name || null,
         bestCandidatePool: passing[0]?.pool?.pool || null,
@@ -1030,6 +1065,8 @@ IMPORTANT:
       appendDecisionLedger({
         result: "no_deploy",
         mode: "llm",
+        outcome: "finished",
+        ...cycleMeta("finished"),
         reason: deployAttempted ? "Deploy attempt did not succeed" : "No successful deploy in screening cycle",
         bestCandidate: passing[0]?.pool?.name || null,
         bestCandidatePool: passing[0]?.pool?.pool || null,
@@ -1064,6 +1101,8 @@ IMPORTANT:
     appendDecisionLedger({
       result: "error",
       mode: "error",
+      outcome: "error",
+      ...cycleMeta("error"),
       reason: `Screening cycle failed: ${error.message}`,
       candidateCount: 0,
       candidatesCacheCount: _latestCandidates.length,
@@ -2026,8 +2065,19 @@ function buildReadinessReport(wallet) {
 
 function describeLatestCandidatesWithFreshness(limit) {
   if (limit == null) limit = 5;
-  if (!_latestCandidates.length) {
+  const staleness = getCandidatesStaleness();
+  // No cache timestamp at all — truly never screened
+  if (!_latestCandidatesAt) {
     return "No cached candidates yet. Run /screen first.";
+  }
+  // Cache timestamp exists but array is empty — last cycle returned 0 candidates
+  if (!_latestCandidates.length) {
+    const age = new Date(_latestCandidatesAt).toLocaleString("en-US", { hour12: false });
+    const ageText = staleness.ageText;
+    const warning = staleness.stale
+      ? "\n\nWarning: Cache is STALE (" + staleness.reason + "; age " + ageText + "). Run /screen to refresh."
+      : "\n\nCache age: " + ageText + " (fresh).";
+    return "0 candidates found — last screening at " + age + " (" + ageText + " ago)." + warning;
   }
   const lines = _latestCandidates.slice(0, limit).map(function (pool, i) {
     const feeTvl = pool.fee_active_tvl_ratio != null ? pool.fee_active_tvl_ratio : (pool.fee_tvl_ratio != null ? pool.fee_tvl_ratio : "?");
@@ -2036,7 +2086,6 @@ function describeLatestCandidatesWithFreshness(limit) {
     const organic = pool.organic_score != null ? pool.organic_score : "?";
     return (i + 1) + ". " + pool.name + " | fee/aTVL " + feeTvl + "% | vol $" + vol + " | in-range " + active + "% | organic " + organic;
   });
-  const staleness = getCandidatesStaleness();
   const age = staleness.updatedAt
     ? new Date(staleness.updatedAt).toLocaleString("en-US", { hour12: false })
     : "unknown";

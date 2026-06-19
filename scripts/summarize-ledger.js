@@ -12,8 +12,8 @@
  *
  * Exports:
  *  - summarizeLedger()                         -> { ok, path, total, firstTs, lastTs,
- *                                                  byResult, byMode, topCandidates,
- *                                                  topReasons, last, error? }
+ *                                                  byResult, byMode, byOutcome,
+ *                                                  topCandidates, topReasons, last, error? }
  *  - formatLedgerSummary(summary, options?)    -> string
  *    options.compact (default false)           -> compact multi-line summary,
  *                                                  suitable for Telegram.
@@ -74,8 +74,12 @@ function summarizeLast(entry) {
   if (!entry) return null;
   const parts = [];
   if (entry.timestamp) parts.push(`timestamp=${entry.timestamp}`);
+  if (entry.cycleId != null) parts.push(`cycleId=${entry.cycleId}`);
+  if (entry.triggerSource != null) parts.push(`triggerSource=${entry.triggerSource}`);
+  if (entry.outcome != null) parts.push(`outcome=${entry.outcome}`);
   if (entry.result != null) parts.push(`result=${entry.result}`);
   if (entry.mode != null) parts.push(`mode=${entry.mode}`);
+  if (entry.durationMs != null) parts.push(`durationMs=${entry.durationMs}`);
   if (entry.bestCandidate) parts.push(`bestCandidate=${entry.bestCandidate}`);
   if (entry.reason) parts.push(`reason=${String(entry.reason).slice(0, 160)}`);
 
@@ -106,6 +110,7 @@ export function summarizeLedger(filePath = LEDGER_PATH) {
     lastTs: null,
     byResult: [],
     byMode: [],
+    byOutcome: [],
     topCandidates: [],
     topReasons: [],
     last: null,
@@ -131,6 +136,7 @@ export function summarizeLedger(filePath = LEDGER_PATH) {
   result.lastTs = total > 0 ? entries[total - 1]?.timestamp || null : null;
   result.byResult = countBy(entries, "result");
   result.byMode = countBy(entries, "mode");
+  result.byOutcome = countBy(entries, "outcome");
   result.topCandidates = topStrings(
     entries,
     (e) => e?.bestCandidate || e?.bestCandidatePool || null,
@@ -177,6 +183,13 @@ export function formatLedgerSummary(summary, options = {}) {
       lines.push("");
       lines.push("by mode:");
       for (const [label, count] of summary.byMode.slice(0, TOP_N)) {
+        lines.push(`  ${count}x ${label}`);
+      }
+    }
+    if (summary.byOutcome?.length) {
+      lines.push("");
+      lines.push("by outcome:");
+      for (const [label, count] of summary.byOutcome.slice(0, TOP_N)) {
         lines.push(`  ${count}x ${label}`);
       }
     }
@@ -239,6 +252,7 @@ export function formatLedgerSummary(summary, options = {}) {
   };
   block("count by result", summary.byResult);
   block("count by mode", summary.byMode);
+  block("count by outcome", summary.byOutcome);
   block(`top bestCandidate names (top ${TOP_N})`, summary.topCandidates);
   block(`top reason strings (top ${TOP_N})`, summary.topReasons);
   lines.push("");

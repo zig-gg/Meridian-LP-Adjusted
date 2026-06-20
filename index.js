@@ -695,14 +695,22 @@ export async function runScreeningCycle(triggerSource = "cron") {
       const combinedExamples = combined.slice(0, 3)
         .map((entry) => `- ${entry.name}: ${entry.reason}`)
         .join("\n");
+      // Use a truthful fallback when discovery returned zero pools (nothing was
+      // filtered — there was simply nothing to filter). Only fall back to the
+      // "no pools met baseline" message when there are genuinely no filtered
+      // examples to surface.
+      const noDiscoveryReason = "No pools met baseline discovery filters (TVL, volume, bin_step, organic score)";
+      const fallbackReason = combined.length > 0
+        ? (combinedExamples || "All candidates filtered before deploy")
+        : noDiscoveryReason;
       screenReport = combinedExamples
         ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
-        : `No candidates available (all filtered by launchpad / holder-quality rules).`;
+        : `No candidates available. ${noDiscoveryReason}.`;
         appendDecision({
           type: "no_deploy",
           actor: "SCREENER",
           summary: "No candidates available",
-          reason: combinedExamples || "All candidates filtered before deploy",
+          reason: fallbackReason,
           rejected: combined.slice(0, 5).map((entry) => `${entry.name}: ${entry.reason}`),
         });
         appendDecisionLedger({
@@ -710,7 +718,7 @@ export async function runScreeningCycle(triggerSource = "cron") {
           mode: "filtered",
           outcome: "finished",
           ...cycleMeta("finished"),
-          reason: combinedExamples || "All candidates filtered before deploy",
+          reason: fallbackReason,
           bestCandidate: null,
           bestCandidatePool: null,
           topCandidates: [],
@@ -735,10 +743,11 @@ export async function runScreeningCycle(triggerSource = "cron") {
           filteredOut,
           earlyFilteredExamples,
           result: "no deploy",
-          reason: combinedExamples || "All candidates filtered before deploy",
+          reason: fallbackReason,
         }));
         return screenReport;
       }
+
 
     if (passing.length === 1) {
       const skipReason = getLoneCandidateSkipReason(passing[0]);

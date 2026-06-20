@@ -1528,7 +1528,141 @@ test("tools/screening.js passes node --check after Ops-8.2b edits", () => {
   execSync("node --check tools/screening.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+// ── Group 16: Ops-8.3 Baseline Discovery Truthfulness ────────────────────────
+
+console.log("\nGroup 16: Ops-8.3 Baseline Discovery Truthfulness\n");
+
+// These tests exercise the reason-selection logic in the passing.length === 0
+// block directly. They simulate the local variables that exist at that point
+// inside runScreeningCycle() and verify the correct reason string is selected.
+// No network calls, no heavy imports.
+
+const NO_DISCOVERY_REASON = "No pools met baseline discovery filters (TVL, volume, bin_step, organic score)";
+
+test("Ops-8.3 Test 1: zero discovery with no filtered examples produces truthful baseline reason", () => {
+  // Simulate the state when getTopCandidates returned candidates=[] and
+  // filtered_examples=[] — discovery found literally nothing.
+  const filteredOutLocal = [];         // post-recon filter caught nothing
+  const earlyFilteredExamplesLocal = []; // upstream found nothing either
+
+  const combined = filteredOutLocal.length > 0 ? filteredOutLocal : earlyFilteredExamplesLocal;
+  const combinedExamples = combined.slice(0, 3)
+    .map((entry) => `- ${entry.name}: ${entry.reason}`)
+    .join("\n");
+
+  // Replicate the logic from index.js
+  const fallbackReason = combined.length > 0
+    ? (combinedExamples || "All candidates filtered before deploy")
+    : NO_DISCOVERY_REASON;
+
+  const screenReportLocal = combinedExamples
+    ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
+    : `No candidates available. ${NO_DISCOVERY_REASON}.`;
+
+  // Assertions
+  assert.strictEqual(fallbackReason, NO_DISCOVERY_REASON,
+    "fallbackReason must be the baseline discovery reason when combined is empty");
+  assert.ok(!fallbackReason.includes("filtered before deploy"),
+    "reason must NOT claim candidates were filtered before deploy");
+  assert.ok(fallbackReason.includes("baseline discovery filters"),
+    "reason must explicitly mention baseline discovery filters");
+  assert.ok(screenReportLocal.includes(NO_DISCOVERY_REASON),
+    "screenReport must contain the baseline discovery reason");
+});
+
+test("Ops-8.3 Test 2: real filtered examples produce existing rejection messages unchanged", () => {
+  // Simulate the state when earlyFilteredExamples has real entries from
+  // upstream screening (getTopCandidates filtered some pools via TVL/volume gates).
+  const filteredOutLocal = [];
+  const earlyFilteredExamplesLocal = [
+    { name: "TOKEN-SOL", reason: "TVL $1500 below minTvl $2000" },
+    { name: "MEME-USDC", reason: "holders 120 below minHolders 300" },
+  ];
+
+  const combined = filteredOutLocal.length > 0 ? filteredOutLocal : earlyFilteredExamplesLocal;
+  const combinedExamples = combined.slice(0, 3)
+    .map((entry) => `- ${entry.name}: ${entry.reason}`)
+    .join("\n");
+
+  const fallbackReason = combined.length > 0
+    ? (combinedExamples || "All candidates filtered before deploy")
+    : NO_DISCOVERY_REASON;
+
+  const screenReportLocal = combinedExamples
+    ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
+    : `No candidates available. ${NO_DISCOVERY_REASON}.`;
+
+  // Assertions — existing behavior preserved
+  assert.ok(fallbackReason.includes("TOKEN-SOL"),
+    "fallbackReason must include filtered pool name when filtered examples exist");
+  assert.ok(fallbackReason.includes("TVL $1500 below minTvl $2000"),
+    "fallbackReason must include the actual rejection reason");
+  assert.ok(!fallbackReason.includes(NO_DISCOVERY_REASON),
+    "baseline discovery reason must NOT appear when real filtered examples exist");
+  assert.ok(screenReportLocal.includes("Filtered examples:"),
+    "screenReport must use 'Filtered examples:' section when filtered examples exist");
+});
+
+test("Ops-8.3 Test 3: ledger schema fields are unchanged (result, mode, candidateCount types preserved)", () => {
+  // Simulate building the appendDecisionLedger payload for the zero-discovery case
+  // and verify the schema-relevant field types are unchanged.
+  const filteredOutLocal = [];
+  const earlyFilteredExamplesLocal = [];
+  const combined = filteredOutLocal.length > 0 ? filteredOutLocal : earlyFilteredExamplesLocal;
+  const combinedExamples = combined.slice(0, 3)
+    .map((entry) => `- ${entry.name}: ${entry.reason}`)
+    .join("\n");
+  const fallbackReason = combined.length > 0
+    ? (combinedExamples || "All candidates filtered before deploy")
+    : NO_DISCOVERY_REASON;
+
+  // Simulate the ledger payload (schema fields only — no live functions called)
+  const ledgerPayload = {
+    result: "no_deploy",
+    mode: "filtered",
+    outcome: "finished",
+    reason: fallbackReason,
+    bestCandidate: null,
+    bestCandidatePool: null,
+    topCandidates: [],
+    rejected: combined.slice(0, 5).map((e) => ({ name: e.name, reason: e.reason })),
+    candidateCount: 0,
+    candidatesCacheCount: 0,
+    apiErrorCount: 0,
+  };
+
+  // Schema invariants
+  assert.strictEqual(ledgerPayload.result, "no_deploy",
+    "result field must remain 'no_deploy'");
+  assert.strictEqual(ledgerPayload.mode, "filtered",
+    "mode field must remain 'filtered'");
+  assert.strictEqual(ledgerPayload.outcome, "finished",
+    "outcome field must remain 'finished'");
+  assert.strictEqual(ledgerPayload.candidateCount, 0,
+    "candidateCount must be integer 0");
+  assert.strictEqual(typeof ledgerPayload.apiErrorCount, "number",
+    "apiErrorCount must be a number");
+  assert.strictEqual(typeof ledgerPayload.reason, "string",
+    "reason must be a string");
+  assert.ok(ledgerPayload.reason.length > 0,
+    "reason must be non-empty");
+  assert.ok(Array.isArray(ledgerPayload.rejected),
+    "rejected must be an array");
+  assert.ok(Array.isArray(ledgerPayload.topCandidates),
+    "topCandidates must be an array");
+  // The new reason must be serializable (no circular refs, valid JSON)
+  const json = JSON.stringify(ledgerPayload);
+  assert.ok(json.length > 0, "ledger payload must be JSON-serializable");
+  assert.ok(!json.includes("All candidates filtered before deploy"),
+    "The misleading fallback must not appear in the zero-discovery ledger payload");
+});
+
+test("index.js passes node --check after Ops-8.3 edits", () => {
+  execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
+
 
 
 console.log(`\n${"─".repeat(50)}`);

@@ -580,7 +580,7 @@ export async function getTopCandidates({ limit = 10 } = {}) {
   const maxTvl = config.screening.maxTvl == null ? null : Number(config.screening.maxTvl);
   const minFeeActiveTvlRatio = Number(config.screening.minFeeActiveTvlRatio ?? 0);
 
-  const eligible = pools
+  const sortedEligible = pools
     .filter((p) => {
       const tvl = Number(p.tvl ?? p.active_tvl ?? 0);
       if (Number.isFinite(minTvl) && minTvl > 0 && tvl < minTvl) {
@@ -620,8 +620,10 @@ export async function getTopCandidates({ limit = 10 } = {}) {
       }
       return true;
     })
-    .sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
-    .slice(0, limit);
+    .sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
+
+  const eligible_before_slice = sortedEligible.length;
+  const eligible = sortedEligible.slice(0, limit);
 
   // ── Jupiter dev-blocklist fail-closed gate ──────────────────────────────────
   // Pools tagged _jup_error:true had their Jupiter deployer fetch fail (network
@@ -829,6 +831,8 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     total_screened: pools.length,
     filtered_examples: filteredOut.slice(0, 3),
     api_health,
+    eligible_before_slice,
+    total: discovery.total,
   };
 }
 

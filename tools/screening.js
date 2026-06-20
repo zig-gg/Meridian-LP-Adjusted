@@ -511,15 +511,26 @@ export async function discoverPools({
               const t = Array.isArray(d) ? d[0] : d;
               return { pool: p.pool, dev: t?.dev || null };
             })
-            .catch(() => ({ pool: p.pool, dev: null }))
+            .catch(() => ({ pool: p.pool, dev: null, error: true }))
         )
       );
       const devMap = {};
       for (const r of devResults) {
-        if (r.status === "fulfilled") devMap[r.value.pool] = r.value.dev;
+        if (r.status === "fulfilled") devMap[r.value.pool] = r.value;
       }
       pools = pools.filter((p) => {
-        const dev = devMap[p.pool];
+        const entry = devMap[p.pool];
+        // If Jupiter fetch failed, tag the pool with a sentinel for the
+        // fail-closed gate in getTopCandidates() — do not filter here because
+        // api_health is not in scope at this point.
+        if (entry?.error) {
+          p._jup_error = true;
+          p._jup_queried = true;
+          return true;
+        }
+        // Mark all successfully-fetched pools so the gate can tally MISSING/AVAILABLE.
+        if (entry) p._jup_queried = true;
+        const dev = entry?.dev ?? null;
         if (dev) p.dev = dev; // enrich in-place
         if (dev && isDevBlocked(dev)) {
           log("dev_blocklist", `Filtered blocked deployer (jup) ${dev.slice(0, 8)} token ${p.base?.symbol}`);
@@ -543,6 +554,19 @@ export async function discoverPools({
  */
 export async function getTopCandidates({ limit = 10 } = {}) {
   const { config } = await import("../config.js");
+
+  // ── api_health provenance counter ──────────────────────────────────────────
+  // Hoisted to the top of the function so it is lexically available to the
+  // Jupiter fail-closed gate (executed before OKX enrichment) and the OKX
+  // enrichment loop. Both sources increment the same shared counters.
+  const api_health = {
+    AVAILABLE: 0,
+    NOT_QUERIED: 0,
+    UNAVAILABLE: 0,
+    MISSING: 0,
+    NEGATIVE_SIGNAL: 0,
+  };
+
   const discovery = await discoverPools({ page_size: 50 });
   const { pools } = discovery;
   const filteredOut = Array.isArray(discovery.filtered_examples) ? [...discovery.filtered_examples] : [];
@@ -599,6 +623,50 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     .sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
     .slice(0, limit);
 
+  // ── Jupiter dev-blocklist fail-closed gate ──────────────────────────────────
+  // Pools tagged _jup_error:true had their Jupiter deployer fetch fail (network
+  // timeout, HTTP error, etc.).  We cannot verify the deployer, so we hard-filter
+  // them here and increment api_health.UNAVAILABLE.  Pools where Jupiter returned
+  // HTTP 200 but no dev field (dev: null, no error) are allowed through and
+  // tallied as MISSING.  Pools with a known, clean deployer are AVAILABLE.
+  // Pools whose deployer is on the blocklist are NEGATIVE_SIGNAL and filtered.
+  // NOTE: _jup_error is only set on pools that went through the Jupiter batch-fetch
+  // inside discoverPools() (i.e. pools that had no dev field from pool discovery
+  // and a non-empty dev blocklist).  Pools that never needed the fetch are
+  // unaffected.
+  {
+    const jupFilterBefore = eligible.length;
+    eligible.splice(0, eligible.length, ...eligible.filter((p) => {
+      if (p._jup_error) {
+        log("dev_blocklist", `Filtered Jupiter-unavailable pool ${p.name} — cannot verify deployer`);
+        pushFilteredReason(filteredOut, p, "Jupiter API unavailable - cannot verify deployer");
+        api_health.UNAVAILABLE++;
+        return false;
+      }
+      // Pool reached here via Jupiter fetch path but dev was null (HTTP 200, no dev)
+      if (p._jup_queried && !p.dev) {
+        api_health.MISSING++;
+        return true;
+      }
+      // Pool reached here via Jupiter fetch path and has a dev — check blocklist
+      if (p._jup_queried && p.dev) {
+        if (isDevBlocked(p.dev)) {
+          log("dev_blocklist", `Filtered blocked deployer (jup-gate) ${p.dev.slice(0, 8)} token ${p.base?.symbol}`);
+          pushFilteredReason(filteredOut, p, "blocked deployer");
+          api_health.NEGATIVE_SIGNAL++;
+          return false;
+        }
+        api_health.AVAILABLE++;
+        return true;
+      }
+      // Pool did not go through the Jupiter fetch path — no telemetry recorded here
+      return true;
+    }));
+    if (eligible.length < jupFilterBefore) {
+      log("dev_blocklist", `Jupiter fail-closed gate removed ${jupFilterBefore - eligible.length} pool(s)`);
+    }
+  }
+
   if (config.screening.avoidPvpSymbols && eligible.length > 0) {
     await enrichPvpRisk(eligible);
     if (config.screening.blockPvpSymbols) {
@@ -612,18 +680,8 @@ export async function getTopCandidates({ limit = 10 } = {}) {
     }
   }
 
-  // ── OKX api_health provenance counter ──────────────────────────────────────
-  // Tracks per-call outcomes across the eligible pool set so the caller can
-  // report a concrete UNAVAILABLE count rather than "not tracked".
-  const api_health = {
-    AVAILABLE: 0,
-    NOT_QUERIED: 0,
-    UNAVAILABLE: 0,
-    MISSING: 0,
-    NEGATIVE_SIGNAL: 0,
-  };
-
   // Enrich with OKX data — advanced info (risk/bundle/sniper) + ATH price (no API key required)
+  // api_health is declared at the top of this function and shared with the Jupiter gate above.
   if (eligible.length > 0) {
     const { getAdvancedInfo, getPriceInfo, getClusterList, getRiskFlags } = await import("./okx.js");
     const okxResults = await Promise.allSettled(

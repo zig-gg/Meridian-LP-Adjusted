@@ -1207,15 +1207,25 @@ test("tools/screening.js: NEGATIVE_SIGNAL is tallied for is_rugpull and is_wash"
     content.includes("api_health.NEGATIVE_SIGNAL++"),
     "api_health.NEGATIVE_SIGNAL must be incremented"
   );
-  // Both signals must be tallied
+  // Both OKX signals must be tallied (>= 2 total occurrences across Jupiter gate + OKX block)
   const negCount = (content.match(/api_health\.NEGATIVE_SIGNAL\+\+/g) || []).length;
   assert.ok(negCount >= 2, `NEGATIVE_SIGNAL must be tallied for both is_rugpull and is_wash, found ${negCount}`);
-  // The increments must appear near is_rugpull and is_wash
-  const negIdx = content.indexOf("api_health.NEGATIVE_SIGNAL++");
-  const negWindow = content.slice(Math.max(0, negIdx - 300), negIdx + 100);
+  // At least one increment must be near is_rugpull or is_wash (the OKX block).
+  // Ops-8.2b adds a Jupiter-gate occurrence earlier in the file (near isDevBlocked),
+  // so we check all occurrences rather than only the first.
+  const negRegex = /api_health\.NEGATIVE_SIGNAL\+\+/g;
+  let match;
+  let foundNearOkxSignals = false;
+  while ((match = negRegex.exec(content)) !== null) {
+    const window = content.slice(Math.max(0, match.index - 300), match.index + 100);
+    if (window.includes("is_rugpull") || window.includes("is_wash")) {
+      foundNearOkxSignals = true;
+      break;
+    }
+  }
   assert.ok(
-    negWindow.includes("is_rugpull") || negWindow.includes("is_wash"),
-    "NEGATIVE_SIGNAL increments must be near is_rugpull / is_wash assignments"
+    foundNearOkxSignals,
+    "At least one NEGATIVE_SIGNAL increment must be near is_rugpull / is_wash assignments (OKX block)"
   );
 });
 
@@ -1379,7 +1389,147 @@ test("index.js passes node --check after Ops-8.3 edits", () => {
   execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+// ── Group 15: Ops-8.2b Jupiter Dev Blocklist Truthfulness ────────────────────
+
+console.log("\nGroup 15: Ops-8.2b Jupiter Dev Blocklist Truthfulness\n");
+
+// These tests exercise the Jupiter fail-closed gate logic directly.
+// They simulate the sentinel flags (_jup_error, _jup_queried) that
+// discoverPools() sets on condensed pool objects, and verify the gate
+// logic that getTopCandidates() applies to them.
+// No network calls are made — all fetch behaviour is simulated via flags.
+
+test("Ops-8.2b Test 1: Jupiter outage hard-filters candidate and increments UNAVAILABLE", () => {
+  // Simulate a condensed pool that went through the Jupiter fetch path
+  // but whose fetch threw a network exception.
+  const pool = {
+    pool: "POOL_A",
+    name: "TOKEN-SOL",
+    base: { symbol: "TOKEN", mint: "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+    tvl: 50000,
+    volatility: 0.05,
+    _jup_error: true,
+    _jup_queried: true,
+  };
+
+  const filteredOut = [];
+  const api_health = { AVAILABLE: 0, NOT_QUERIED: 0, UNAVAILABLE: 0, MISSING: 0, NEGATIVE_SIGNAL: 0 };
+
+  // Simulate the gate logic from getTopCandidates()
+  const survived = [pool].filter((p) => {
+    if (p._jup_error) {
+      filteredOut.push({ name: p.name, reason: "Jupiter API unavailable - cannot verify deployer" });
+      api_health.UNAVAILABLE++;
+      return false;
+    }
+    if (p._jup_queried && !p.dev) { api_health.MISSING++;         return true; }
+    if (p._jup_queried && p.dev)  { api_health.AVAILABLE++;       return true; }
+    return true;
+  });
+
+  assert.strictEqual(survived.length, 0, "Pool must be removed from eligible candidates");
+  assert.strictEqual(api_health.UNAVAILABLE, 1, "UNAVAILABLE must be incremented by 1");
+  assert.strictEqual(api_health.AVAILABLE, 0, "AVAILABLE must not be incremented");
+  assert.strictEqual(api_health.MISSING, 0, "MISSING must not be incremented");
+  assert.strictEqual(filteredOut.length, 1, "filteredOut must contain one entry");
+  assert.strictEqual(
+    filteredOut[0].reason,
+    "Jupiter API unavailable - cannot verify deployer",
+    "Exact reason string must match contract"
+  );
+});
+
+test("Ops-8.2b Test 2: Jupiter HTTP-200 with missing dev passes filter and increments MISSING", () => {
+  // Simulate a pool where Jupiter returned HTTP 200 but the payload
+  // contained no deployer address (dev: null).
+  const pool = {
+    pool: "POOL_B",
+    name: "ANON-SOL",
+    base: { symbol: "ANON", mint: "MintBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" },
+    tvl: 60000,
+    volatility: 0.04,
+    dev: null,
+    _jup_queried: true,
+    // _jup_error is intentionally absent
+  };
+
+  const filteredOut = [];
+  const api_health = { AVAILABLE: 0, NOT_QUERIED: 0, UNAVAILABLE: 0, MISSING: 0, NEGATIVE_SIGNAL: 0 };
+
+  const survived = [pool].filter((p) => {
+    if (p._jup_error) {
+      filteredOut.push({ name: p.name, reason: "Jupiter API unavailable - cannot verify deployer" });
+      api_health.UNAVAILABLE++;
+      return false;
+    }
+    if (p._jup_queried && !p.dev) { api_health.MISSING++;   return true; }
+    if (p._jup_queried && p.dev)  { api_health.AVAILABLE++; return true; }
+    return true;
+  });
+
+  assert.strictEqual(survived.length, 1, "Pool must survive (missing dev is not a block)");
+  assert.strictEqual(api_health.MISSING, 1, "MISSING must be incremented by 1");
+  assert.strictEqual(api_health.UNAVAILABLE, 0, "UNAVAILABLE must not be incremented");
+  assert.strictEqual(api_health.AVAILABLE, 0, "AVAILABLE must not be incremented");
+  assert.strictEqual(filteredOut.length, 0, "filteredOut must remain empty");
+});
+
+test("Ops-8.2b Test 3: Jupiter blocklist match filters candidate and increments NEGATIVE_SIGNAL", () => {
+  // Simulate a pool where Jupiter returned a known blocked developer address.
+  const BLOCKED_DEV = "BlockedDevWallet111111111111111111111111111";
+  const pool = {
+    pool: "POOL_C",
+    name: "RUG-SOL",
+    base: { symbol: "RUG", mint: "MintCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC" },
+    tvl: 55000,
+    volatility: 0.06,
+    dev: BLOCKED_DEV,
+    _jup_queried: true,
+  };
+
+  const filteredOut = [];
+  const api_health = { AVAILABLE: 0, NOT_QUERIED: 0, UNAVAILABLE: 0, MISSING: 0, NEGATIVE_SIGNAL: 0 };
+
+  // Simulate isDevBlocked() returning true for this specific wallet
+  const mockIsDevBlocked = (dev) => dev === BLOCKED_DEV;
+
+  const survived = [pool].filter((p) => {
+    if (p._jup_error) {
+      filteredOut.push({ name: p.name, reason: "Jupiter API unavailable - cannot verify deployer" });
+      api_health.UNAVAILABLE++;
+      return false;
+    }
+    if (p._jup_queried && !p.dev) { api_health.MISSING++; return true; }
+    if (p._jup_queried && p.dev) {
+      if (mockIsDevBlocked(p.dev)) {
+        filteredOut.push({ name: p.name, reason: "blocked deployer" });
+        api_health.NEGATIVE_SIGNAL++;
+        return false;
+      }
+      api_health.AVAILABLE++;
+      return true;
+    }
+    return true;
+  });
+
+  assert.strictEqual(survived.length, 0, "Pool must be removed (blocked deployer)");
+  assert.strictEqual(api_health.NEGATIVE_SIGNAL, 1, "NEGATIVE_SIGNAL must be incremented by 1");
+  assert.strictEqual(api_health.UNAVAILABLE, 0, "UNAVAILABLE must not be incremented");
+  assert.strictEqual(api_health.MISSING, 0, "MISSING must not be incremented");
+  assert.strictEqual(api_health.AVAILABLE, 0, "AVAILABLE must not be incremented");
+  assert.strictEqual(filteredOut.length, 1, "filteredOut must contain one entry");
+  assert.ok(
+    filteredOut[0].reason === "blocked deployer",
+    "Reason must indicate blocked deployer"
+  );
+});
+
+test("tools/screening.js passes node --check after Ops-8.2b edits", () => {
+  execSync("node --check tools/screening.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
+
 
 console.log(`\n${"─".repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);

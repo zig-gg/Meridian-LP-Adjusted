@@ -648,6 +648,14 @@ export async function runScreeningCycle(triggerSource = "cron") {
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
     apiErrorCount = topCandidates?.api_health?.UNAVAILABLE ?? 0;
 
+    const funnelSnapshot = {
+      stage_api_total: topCandidates?.total ?? null,
+      stage_post_discover: topCandidates?.total_screened ?? null,
+      stage_pre_slice: topCandidates?.eligible_before_slice ?? null,
+      stage_post_getTop: candidates.length,
+      stage_post_recon: null,
+    };
+
     const allCandidates = [];
     for (const pool of candidates) {
       const mint = pool.base?.mint;
@@ -689,6 +697,9 @@ export async function runScreeningCycle(triggerSource = "cron") {
       }
       return true;
     });
+
+    funnelSnapshot.stage_post_recon = passing.length;
+    _lastFunnelSnapshot = funnelSnapshot;
 
     if (passing.length === 0) {
       const combined = filteredOut.length > 0 ? filteredOut : earlyFilteredExamples;
@@ -1381,6 +1392,7 @@ const MAX_HISTORY = 20;    // keep last 20 messages (10 exchanges)
 let _ttyInterface = null;
 let _latestCandidates = [];
 let _latestCandidatesAt = null;
+let _lastFunnelSnapshot = null;
 
 // Ops-3: Scanner report quality - store latest screening cycle summary
 let _lastScreeningSummary = null; // { time, result, bestCandidate, whySkipped, rejectedList, apiErrorCount, candidatesCacheCount, safetyFlags }
@@ -1831,6 +1843,7 @@ function isTelegramReadOnlyCommand(text) {
     text === "/positions" ||
     text === "/screen" ||
     text === "/candidates" ||
+    text === "/funnel" ||
     text === "/briefing" ||
     text === "/report" ||
     text === "/wallet-ready" ||
@@ -1880,6 +1893,7 @@ function formatHelpText() {
     "/config - show important runtime config",
     "/screen - refresh deterministic candidate list",
     "/candidates - show latest cached candidates (with age + stale warning)",
+    "/funnel - show latest screening funnel metrics (read-only)",
     "/briefing - morning briefing (requires LLM enabled; otherwise returns disabled notice)",
     "/report - generate position & market report (with cache freshness + wallet readiness)",
     "/wallet-ready - show wallet readiness + reasons (read-only)",
@@ -2472,6 +2486,23 @@ async function telegramHandler(msg) {
 
   if (text === "/candidates") {
     await sendMessage(describeLatestCandidatesWithFreshness(5)).catch(() => {});
+    return;
+  }
+
+  if (text === "/funnel") {
+    if (!_lastFunnelSnapshot) {
+      await sendMessage("No funnel data yet. Run /screen first.").catch(() => {});
+      return;
+    }
+    const snap = _lastFunnelSnapshot;
+    await sendMessage([
+      "🔻 Screening Funnel",
+      `API total:       ${snap.stage_api_total ?? "?"}`,
+      `Post-discover:   ${snap.stage_post_discover ?? "?"}`,
+      `Pre-slice:       ${snap.stage_pre_slice ?? "?"}`,
+      `Post-getTop:     ${snap.stage_post_getTop ?? "?"}`,
+      `Post-recon:      ${snap.stage_post_recon ?? "?"}`,
+    ].join("\n")).catch(() => {});
     return;
   }
 

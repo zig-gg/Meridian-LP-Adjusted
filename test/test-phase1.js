@@ -1661,6 +1661,64 @@ test("index.js passes node --check after Ops-8.3 edits", () => {
   execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+// ── Group 17: Ops-8.4-Lite Observability Funnel ──────────────────────────────
+
+console.log("\nGroup 17: Ops-8.4-Lite Observability Funnel\n");
+
+test("Ops-8.4-Lite Test 1: getTopCandidates return object contains eligible_before_slice and total", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  const fnIdx = content.indexOf("export async function getTopCandidates(");
+  assert.ok(fnIdx >= 0, "getTopCandidates must be exported");
+  const fnEnd = content.indexOf("\nexport async function ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 8000);
+  const returnIdx = fnBody.lastIndexOf("return {");
+  assert.ok(returnIdx >= 0, "getTopCandidates return statement not found");
+  const returnBlock = fnBody.slice(returnIdx, fnBody.indexOf("};", returnIdx) + 2);
+  assert.ok(returnBlock.includes("eligible_before_slice"), "getTopCandidates return must include eligible_before_slice");
+  assert.ok(returnBlock.includes("total: discovery.total"), "getTopCandidates return must include discovery.total");
+});
+
+test("Ops-8.4-Lite Test 2: index.js defines funnelSnapshot with correct structure", () => {
+  const content = readFileSync("index.js", "utf8");
+  assert.ok(content.includes("const funnelSnapshot = {"), "index.js must define funnelSnapshot");
+  const snapIdx = content.indexOf("const funnelSnapshot = {");
+  const snapBlock = content.slice(snapIdx, content.indexOf("};", snapIdx) + 2);
+  assert.ok(snapBlock.includes("stage_api_total"), "funnelSnapshot must contain stage_api_total");
+  assert.ok(snapBlock.includes("stage_post_discover"), "funnelSnapshot must contain stage_post_discover");
+  assert.ok(snapBlock.includes("stage_pre_slice"), "funnelSnapshot must contain stage_pre_slice");
+  assert.ok(snapBlock.includes("stage_post_getTop"), "funnelSnapshot must contain stage_post_getTop");
+  assert.ok(snapBlock.includes("stage_post_recon"), "funnelSnapshot must contain stage_post_recon");
+});
+
+test("Ops-8.4-Lite Test 3: index.js defines and updates _lastFunnelSnapshot in memory", () => {
+  const content = readFileSync("index.js", "utf8");
+  assert.ok(content.includes("let _lastFunnelSnapshot = null;"), "index.js must define _lastFunnelSnapshot");
+  assert.ok(content.includes("_lastFunnelSnapshot = funnelSnapshot;"), "index.js must save funnelSnapshot to _lastFunnelSnapshot");
+});
+
+test("Ops-8.4-Lite Test 4: index.js includes /funnel in read-only commands and help text", () => {
+  const content = readFileSync("index.js", "utf8");
+  assert.ok(content.includes('text === "/funnel"'), "index.js must validate /funnel command as read-only");
+  assert.ok(content.includes('"/funnel - show latest screening funnel metrics (read-only)"'), "index.js must document /funnel in help text");
+});
+
+test("Ops-8.4-Lite Test 5: index.js implements /funnel handler in telegramHandler", () => {
+  const content = readFileSync("index.js", "utf8");
+  assert.ok(content.includes('if (text === "/funnel")'), "index.js must handle /funnel command");
+  const handlerIdx = content.indexOf('if (text === "/funnel")');
+  const handlerBlock = content.slice(handlerIdx, handlerIdx + 600);
+  assert.ok(handlerBlock.includes("🔻 Screening Funnel"), "Handler must print funnel title");
+  assert.ok(handlerBlock.includes("API total:"), "Handler must print API total");
+  assert.ok(handlerBlock.includes("Post-discover:"), "Handler must print Post-discover");
+  assert.ok(handlerBlock.includes("Pre-slice:"), "Handler must print Pre-slice");
+  assert.ok(handlerBlock.includes("Post-getTop:"), "Handler must print Post-getTop");
+  assert.ok(handlerBlock.includes("Post-recon:"), "Handler must print Post-recon");
+});
+
+test("index.js passes node --check after Ops-8.4-Lite edits", () => {
+  execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
 
 

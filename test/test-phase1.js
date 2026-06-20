@@ -1284,6 +1284,101 @@ test("index.js passes node --check after Ops-8.2 edits", () => {
   execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+// ── Group 14: Ops-8.3 Telemetry Edge-Case Cleanup ────────────────────────────
+
+console.log("\nGroup 14: Ops-8.3 Telemetry Edge-Case Cleanup\n");
+
+test("index.js: getCandidatesStaleness uses 5000ms drift buffer", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Find the getCandidatesStaleness function body
+  const fnIdx = content.indexOf("function getCandidatesStaleness()");
+  assert.ok(fnIdx >= 0, "getCandidatesStaleness must exist");
+  const fnEnd = content.indexOf("\nfunction ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 1500);
+  // Must use updatedAt + 5000 drift buffer (not bare > updatedAt)
+  assert.ok(
+    fnBody.includes("updatedAt + 5000"),
+    "getCandidatesStaleness must add a 5000ms drift buffer: summaryTime > (updatedAt + 5000)"
+  );
+  // Must NOT use the old bare > updatedAt comparison (without the buffer)
+  assert.ok(
+    !fnBody.includes("summaryTime > updatedAt") || fnBody.includes("summaryTime > (updatedAt + 5000)"),
+    "getCandidatesStaleness must not use the old bare summaryTime > updatedAt comparison"
+  );
+});
+
+test("index.js: getCandidatesStaleness drift buffer is exactly 5000", () => {
+  const content = readFileSync("index.js", "utf8");
+  const fnIdx = content.indexOf("function getCandidatesStaleness()");
+  assert.ok(fnIdx >= 0, "getCandidatesStaleness must exist");
+  const fnEnd = content.indexOf("\nfunction ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 1500);
+  // Ensure the literal 5000 is present in the buffer expression
+  const bufferMatch = fnBody.match(/summaryTime\s*>\s*\(\s*updatedAt\s*\+\s*5000\s*\)/);
+  assert.ok(
+    bufferMatch,
+    "The drift buffer expression must be exactly: summaryTime > (updatedAt + 5000)"
+  );
+});
+
+test("index.js: buildScreeningSummary does not emit apiErrorCount: \"not tracked\"", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Find buildScreeningSummary function body
+  const fnIdx = content.indexOf("function buildScreeningSummary(");
+  assert.ok(fnIdx >= 0, "buildScreeningSummary must exist");
+  const fnEnd = content.indexOf("\nfunction ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 3000);
+  // Must not contain the hardcoded "not tracked" string in this function
+  assert.ok(
+    !fnBody.includes('"not tracked"'),
+    'buildScreeningSummary must not hardcode apiErrorCount: "not tracked"'
+  );
+});
+
+test("index.js: filtered outcome block (passing.length === 0) uses real apiErrorCount, not \"not tracked\"", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Find the passing.length === 0 early-exit block
+  const filteredIdx = content.indexOf("if (passing.length === 0)");
+  assert.ok(filteredIdx >= 0, "passing.length === 0 block must exist");
+  // Find the appendDecisionLedger call inside that block — look forward ~2000 chars
+  const blockWindow = content.slice(filteredIdx, filteredIdx + 2000);
+  // Confirm the ledger call is present
+  assert.ok(
+    blockWindow.includes("appendDecisionLedger("),
+    "filtered outcome block must call appendDecisionLedger"
+  );
+  // Must NOT use "not tracked" as the apiErrorCount value
+  assert.ok(
+    !blockWindow.includes('"not tracked"'),
+    'filtered outcome appendDecisionLedger must not use apiErrorCount: "not tracked"'
+  );
+  // Must use the real apiErrorCount variable
+  assert.ok(
+    blockWindow.includes("apiErrorCount"),
+    "filtered outcome appendDecisionLedger must reference the apiErrorCount variable"
+  );
+});
+
+test("index.js: no hardcoded \"not tracked\" remains inside runScreeningCycle after getTopCandidates fetch", () => {
+  const content = readFileSync("index.js", "utf8");
+  // Bound the check to after getTopCandidates call through startCronJobs
+  const getTopIdx = content.indexOf("const topCandidates = await getTopCandidates(");
+  assert.ok(getTopIdx >= 0, "getTopCandidates call must exist");
+  const cronJobsIdx = content.indexOf("export function startCronJobs()", getTopIdx);
+  assert.ok(cronJobsIdx > getTopIdx, "startCronJobs must follow runScreeningCycle");
+  const innerRegion = content.slice(getTopIdx, cronJobsIdx);
+  const notTrackedInFiltered = (innerRegion.match(/apiErrorCount:\s*"not tracked"/g) || []).length;
+  assert.strictEqual(
+    notTrackedInFiltered,
+    0,
+    `All appendDecisionLedger calls inside runScreeningCycle after getTopCandidates must use the real apiErrorCount, found ${notTrackedInFiltered} remaining "not tracked" occurrences`
+  );
+});
+
+test("index.js passes node --check after Ops-8.3 edits", () => {
+  execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
 
 console.log(`\n${"─".repeat(50)}`);

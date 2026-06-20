@@ -1477,7 +1477,7 @@ function buildScreeningSummary({ screenReport, passing, filteredOut, earlyFilter
     bestCandidate,
     whySkipped: reason || extractSkipReason(reportText) || null,
     rejectedList,
-    apiErrorCount: "not tracked",
+    apiErrorCount: 0,
     candidatesCacheCount: Array.isArray(_latestCandidates) ? _latestCandidates.length : 0,
     safetyFlags,
     tokenRisk: bestCandidateRisk,
@@ -2022,7 +2022,9 @@ function getCandidatesStaleness() {
   let summaryTime = null;
   if (summary && summary.time) {
     summaryTime = new Date(summary.time).getTime();
-    if (Number.isFinite(summaryTime) && summaryTime > updatedAt) {
+    // Allow a 5000ms drift buffer: the summary is written a few milliseconds
+    // after the cache timestamp, so require a meaningful gap before flagging stale.
+    if (Number.isFinite(summaryTime) && summaryTime > (updatedAt + 5000)) {
       staleBySummary = true;
     }
   }

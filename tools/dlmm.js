@@ -1193,7 +1193,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
       const tracked = getTrackedPosition(pos.position);
       return {
         ...pos,
-        minutes_out_of_range: minutesOutOfRange(pos.position),
+        minutes_out_of_range: minutesOutOfRange(pos.position) || pos.minutes_out_of_range || 0,
         instruction: tracked?.instruction ?? pos.instruction ?? null,
       };
     });

@@ -1162,13 +1162,32 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
     const path = await import("path");
     const { fileURLToPath } = await import("url");
     const dirname = path.dirname(fileURLToPath(import.meta.url));
-    const filePath = path.join(dirname, "..", "data", "paper_positions.json");
+    const overridePath = path.join(dirname, "..", "data", "paper_positions.json");
+    const fixturePath = path.join(dirname, "..", "test", "fixtures", "paper_positions.json");
     let rawPositions = [];
+    let loaded = false;
     try {
-      const rawData = fs.readFileSync(filePath, "utf8");
-      rawPositions = JSON.parse(rawData);
+      if (fs.existsSync(overridePath)) {
+        const rawData = fs.readFileSync(overridePath, "utf8");
+        rawPositions = JSON.parse(rawData);
+        loaded = true;
+      }
     } catch (err) {
-      log("positions_warn", `Failed to read paper_positions.json: ${err.message}`);
+      log("positions_warn", `Failed to load paper positions override: ${err.message}`);
+    }
+    if (!loaded) {
+      try {
+        if (fs.existsSync(fixturePath)) {
+          const rawData = fs.readFileSync(fixturePath, "utf8");
+          rawPositions = JSON.parse(rawData);
+          loaded = true;
+        }
+      } catch (err) {
+        log("positions_warn", `Failed to load paper positions fixture: ${err.message}`);
+      }
+    }
+    if (!loaded) {
+      log("positions_warn", "No valid paper positions source could be loaded.");
     }
     const positions = rawPositions.map(pos => {
       const tracked = getTrackedPosition(pos.position);

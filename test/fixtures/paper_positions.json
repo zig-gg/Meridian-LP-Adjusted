@@ -1,0 +1,26 @@
+[
+  {
+    "position": "4aM95tMoT9PccFybTndctXyDgbyzL6LE2dzL9SJS3aoS",
+    "pool": "EUmfCSSSLoDCwG667B4ApnNhWh76r1ebqiuAJjVnXkNH",
+    "pair": "MOCK-SOL",
+    "base_mint": "4RqaE2At7x64naehSpzf81eJUPeWCeoq2y1N2aF4qvkD",
+    "lower_bin": 100,
+    "upper_bin": 200,
+    "active_bin": 150,
+    "in_range": true,
+    "unclaimed_fees_usd": 0.05,
+    "total_value_usd": 15.0,
+    "total_value_true_usd": 15.0,
+    "collected_fees_usd": 0.01,
+    "collected_fees_true_usd": 0.01,
+    "pnl_usd": 0.15,
+    "pnl_true_usd": 0.15,
+    "pnl_pct": 1.0,
+    "pnl_pct_derived": 1.0,
+    "pnl_pct_diff": 0.0,
+    "pnl_pct_suspicious": false,
+    "unclaimed_fees_true_usd": 0.05,
+    "fee_per_tvl_24h": 12.0,
+    "age_minutes": 30
+  }
+]

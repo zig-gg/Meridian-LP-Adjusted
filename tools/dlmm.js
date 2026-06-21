@@ -1152,6 +1152,45 @@ async function fetchRawOpenPositionsFromMeridian({ walletAddress, agentId }) {
 
 // ─── Get My Positions ──────────────────────────────────────────
 export async function getMyPositions({ force = false, silent = false, wallet_address = null } = {}) {
+  const { getExecutionMode } = await import("../execution-modes.js");
+  if (getExecutionMode() === "paper") {
+    const useLocalWallet = !wallet_address;
+    if (useLocalWallet && !force && _positionsCache && Date.now() - _positionsCacheAt < POSITIONS_CACHE_TTL) {
+      return _positionsCache;
+    }
+    const fs = await import("fs");
+    const path = await import("path");
+    const { fileURLToPath } = await import("url");
+    const dirname = path.dirname(fileURLToPath(import.meta.url));
+    const filePath = path.join(dirname, "..", "data", "paper_positions.json");
+    let rawPositions = [];
+    try {
+      const rawData = fs.readFileSync(filePath, "utf8");
+      rawPositions = JSON.parse(rawData);
+    } catch (err) {
+      log("positions_warn", `Failed to read paper_positions.json: ${err.message}`);
+    }
+    const positions = rawPositions.map(pos => {
+      const tracked = getTrackedPosition(pos.position);
+      return {
+        ...pos,
+        minutes_out_of_range: minutesOutOfRange(pos.position),
+        instruction: tracked?.instruction ?? pos.instruction ?? null,
+      };
+    });
+    const result = {
+      wallet: wallet_address || null,
+      total_positions: positions.length,
+      positions,
+      request_id: null,
+    };
+    if (useLocalWallet) {
+      _positionsCache = result;
+      _positionsCacheAt = Date.now();
+    }
+    return result;
+  }
+
   let walletOverride = null;
   try {
     walletOverride = wallet_address ? new PublicKey(wallet_address).toString() : null;

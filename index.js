@@ -383,6 +383,84 @@ export async function runManagementCycle({ silent = false } = {}) {
       actionMap.set(p.position, { action: "STAY" });
     }
 
+    // ── Auto-execute CLOSE in Paper Mode ────────────────────────────
+    const { getExecutionMode } = await import("./execution-modes.js");
+    if (getExecutionMode() === "paper") {
+      let closedAny = false;
+      for (const p of positionData) {
+        const act = actionMap.get(p.position);
+        if (act && act.action === "CLOSE") {
+          log("cron", `[Auto-Close] Automatically closing paper position ${p.pair} (${p.position}) for reason: ${act.reason}`);
+          try {
+            const result = await closePosition({ position_address: p.position, reason: act.reason });
+            if (result && result.success) {
+              closedAny = true;
+              const { notifyClose } = await import("./telegram.js");
+              await notifyClose({
+                pair: p.pair,
+                pnlUsd: result.pnl_usd ?? 0,
+                pnlPct: result.pnl_pct ?? 0,
+              }).catch((e) => log("telegram_error", `Failed to send Telegram close notify: ${e.message}`));
+              
+              // Also record decision ledger log
+              appendDecision({
+                type: "close",
+                actor: "AUTO_MANAGER",
+                pool: p.pool,
+                pool_name: p.pair,
+                position: p.position,
+                summary: `Auto-closed paper position at ${(result.pnl_pct ?? 0).toFixed(2)}%`,
+                reason: act.reason,
+                metrics: {
+                  pnl_usd: result.pnl_usd ?? 0,
+                  pnl_pct: result.pnl_pct ?? 0,
+                },
+              });
+            } else {
+              log("cron_error", `[Auto-Close] Failed to automatically close ${p.pair}: ${result?.error || "unknown error"}`);
+            }
+          } catch (e) {
+            log("cron_error", `[Auto-Close] Error automatically closing ${p.pair}: ${e.message}`);
+          }
+        }
+      }
+      
+      // If we closed any positions, refresh the position data in the cycle
+      if (closedAny) {
+        const refreshedPositions = await getMyPositions({ force: true }).catch(() => null);
+        const nextPositions = refreshedPositions?.positions || [];
+        positions = nextPositions; // Update parent cycle variable
+        
+        const nextPositionData = nextPositions.map((p) => {
+          recordPositionSnapshot(p.pool, p);
+          return { ...p, recall: recallForPool(p.pool) };
+        });
+        
+        // Re-evaluate actions for remaining positions
+        actionMap.clear();
+        for (const p of nextPositionData) {
+          if (p.instruction) {
+            actionMap.set(p.position, { action: "INSTRUCTION" });
+            continue;
+          }
+          const closeRule = getDeterministicCloseRule(p, config.management);
+          if (closeRule) {
+            actionMap.set(p.position, closeRule);
+            continue;
+          }
+          if ((p.unclaimed_fees_usd ?? 0) >= config.management.minClaimAmount) {
+            actionMap.set(p.position, { action: "CLAIM" });
+            continue;
+          }
+          actionMap.set(p.position, { action: "STAY" });
+        }
+        
+        // Reassign positionData array in-place so all subsequent operations see the new open positions
+        positionData.length = 0;
+        positionData.push(...nextPositionData);
+      }
+    }
+
     // ── Build JS report ──────────────────────────────────────────────
     const totalValue = positionData.reduce((s, p) => s + (p.total_value_usd ?? 0), 0);
     const totalUnclaimed = positionData.reduce((s, p) => s + (p.unclaimed_fees_usd ?? 0), 0);

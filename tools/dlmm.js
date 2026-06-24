@@ -571,6 +571,68 @@ export async function deployPosition({
   }
 
   if (process.env.DRY_RUN === "true") {
+    const { getExecutionMode } = await import("../execution-modes.js");
+    if (getExecutionMode() === "paper") {
+      const minBinId = activeBin.binId - activeBinsBelow;
+      const maxBinId = isSingleSidedSol ? activeBin.binId : activeBin.binId + activeBinsAbove;
+      
+      const path = await import("path");
+      const { fileURLToPath } = await import("url");
+      
+      const dirname = path.dirname(fileURLToPath(import.meta.url));
+      const activePath = path.join(dirname, "..", "data", "paper_active_positions.json");
+      
+      let paperPositions = await loadPaperPositions(activePath);
+      
+      const poolPrefix = pool_address.substring(0, 7);
+      const syntheticId = `paper_${Date.now()}_${poolPrefix}`;
+      const base_mint = pool.lbPair.tokenXMint.toString();
+      
+      const newPaperPosition = {
+        position: syntheticId,
+        pool: pool_address,
+        pair: pool_name || "UNKNOWN-PAIR",
+        base_mint: base_mint,
+        lower_bin: minBinId,
+        upper_bin: maxBinId,
+        active_bin: activeBin.binId,
+        in_range: true,
+        unclaimed_fees_usd: 0,
+        total_value_usd: initial_value_usd || (finalAmountY * 150),
+        total_value_true_usd: initial_value_usd || (finalAmountY * 150),
+        collected_fees_usd: 0,
+        collected_fees_true_usd: 0,
+        pnl_usd: 0,
+        pnl_true_usd: 0,
+        pnl_pct: 0,
+        pnl_pct_derived: 0,
+        pnl_pct_diff: 0,
+        pnl_pct_suspicious: false,
+        unclaimed_fees_true_usd: 0,
+        fee_per_tvl_24h: fee_tvl_ratio || 0,
+        age_minutes: 0
+      };
+      
+      paperPositions.push(newPaperPosition);
+      await savePaperPositions(activePath, paperPositions);
+      
+      log("deploy", `[Paper Mode] Created synthetic position ${syntheticId} for ${pool_address}`);
+      
+      return {
+        dry_run: true,
+        paper_position_created: true,
+        position: syntheticId,
+        pool: pool_address,
+        pool_name,
+        bin_range: { min: minBinId, max: maxBinId, active: activeBin.binId },
+        strategy: activeStrategy,
+        wide_range: totalBins > 69,
+        amount_x: finalAmountX,
+        amount_y: finalAmountY,
+        message: "DRY RUN — synthetic paper position created"
+      };
+    }
+
     return {
       dry_run: true,
       would_deploy: {
@@ -1158,39 +1220,15 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
     if (useLocalWallet && !force && _positionsCache && Date.now() - _positionsCacheAt < POSITIONS_CACHE_TTL) {
       return _positionsCache;
     }
-    const fs = await import("fs");
     const path = await import("path");
     const { fileURLToPath } = await import("url");
     const dirname = path.dirname(fileURLToPath(import.meta.url));
     const activePath = path.join(dirname, "..", "data", "paper_active_positions.json");
-    const fixturePath = path.join(dirname, "..", "test", "fixtures", "paper_positions.json");
-    let rawPositions = [];
-    let loaded = false;
-    try {
-      if (!fs.existsSync(activePath)) {
-        log("positions", "Active paper positions file does not exist. Seeding from fixture...");
-        if (fs.existsSync(fixturePath)) {
-          const rawData = fs.readFileSync(fixturePath, "utf8");
-          rawPositions = JSON.parse(rawData);
-          const dataDir = path.dirname(activePath);
-          if (!fs.existsSync(dataDir)) {
-            fs.mkdirSync(dataDir, { recursive: true });
-          }
-          fs.writeFileSync(activePath, JSON.stringify(rawPositions, null, 2), "utf8");
-          loaded = true;
-        } else {
-          log("positions_warn", "Paper positions fixture not found.");
-        }
-      } else {
-        const rawData = fs.readFileSync(activePath, "utf8");
-        rawPositions = JSON.parse(rawData);
-        loaded = true;
-      }
-    } catch (err) {
-      log("positions_warn", `Failed to load/seed paper active positions: ${err.message}`);
-    }
-    if (!loaded) {
-      log("positions_warn", "No valid paper positions source could be loaded.");
+    
+    const rawPositions = await loadPaperPositions(activePath);
+    
+    if (rawPositions.length === 0) {
+      log("positions", "No paper active positions found or file is empty/invalid. Starting with empty state.");
     }
     const positions = rawPositions.map(pos => {
       const tracked = getTrackedPosition(pos.position);
@@ -1568,32 +1606,13 @@ export async function closePosition({ position_address, reason }) {
   const { getExecutionMode } = await import("../execution-modes.js");
   if (getExecutionMode() === "paper") {
     log("close", `[Paper Mode] Closing position: ${position_address} for reason: ${reason || "none"}`);
-    const fs = await import("fs");
     const path = await import("path");
     const { fileURLToPath } = await import("url");
     const dirname = path.dirname(fileURLToPath(import.meta.url));
     const activePath = path.join(dirname, "..", "data", "paper_active_positions.json");
     const archivePath = path.join(dirname, "..", "data", "paper_archive.json");
-    const fixturePath = path.join(dirname, "..", "test", "fixtures", "paper_positions.json");
 
-    let activePositions = [];
-    try {
-      if (fs.existsSync(activePath)) {
-        activePositions = JSON.parse(fs.readFileSync(activePath, "utf8"));
-      } else {
-        if (fs.existsSync(fixturePath)) {
-          activePositions = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
-          const dataDir = path.dirname(activePath);
-          if (!fs.existsSync(dataDir)) {
-            fs.mkdirSync(dataDir, { recursive: true });
-          }
-          fs.writeFileSync(activePath, JSON.stringify(activePositions, null, 2), "utf8");
-        }
-      }
-    } catch (err) {
-      log("close_error", `Failed to load paper active positions: ${err.message}`);
-      return { success: false, error: `Failed to load paper active positions: ${err.message}` };
-    }
+    let activePositions = await loadPaperPositions(activePath);
 
     const posIndex = activePositions.findIndex(p => p.position === position_address);
     if (posIndex === -1) {
@@ -1603,31 +1622,15 @@ export async function closePosition({ position_address, reason }) {
     const closedPos = activePositions.splice(posIndex, 1)[0];
 
     // Append to archive state
-    let archivePositions = [];
-    try {
-      if (fs.existsSync(archivePath)) {
-        archivePositions = JSON.parse(fs.readFileSync(archivePath, "utf8"));
-      }
-    } catch (err) {
-      log("close_warn", `Failed to load paper archive positions: ${err.message}`);
-    }
+    let archivePositions = await loadPaperPositions(archivePath);
 
     // Add close reason to the archived position object
     closedPos.close_reason = reason || "manual close";
 
     archivePositions.push(closedPos);
 
-    try {
-      fs.writeFileSync(activePath, JSON.stringify(activePositions, null, 2), "utf8");
-      const dataDir = path.dirname(archivePath);
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
-      fs.writeFileSync(archivePath, JSON.stringify(archivePositions, null, 2), "utf8");
-    } catch (err) {
-      log("close_error", `Failed to write paper states: ${err.message}`);
-      return { success: false, error: `Failed to write paper states: ${err.message}` };
-    }
+    await savePaperPositions(activePath, activePositions);
+    await savePaperPositions(archivePath, archivePositions);
 
     _positionsCache = null;
     _positionsCacheAt = 0;
@@ -2196,4 +2199,36 @@ async function lookupPoolForPosition(position_address, walletAddress) {
   }
 
   throw new Error(`Position ${position_address} not found in open positions`);
+}
+
+export async function loadPaperPositions(targetPath) {
+  const fs = await import("fs");
+  if (!fs.existsSync(targetPath)) return [];
+  try {
+    const rawData = fs.readFileSync(targetPath, "utf8");
+    if (!rawData || !rawData.trim()) return [];
+    const parsed = JSON.parse(rawData);
+    if (!Array.isArray(parsed)) {
+      log("positions_warn", `Paper positions file is not an array. Defaulting to empty.`);
+      return [];
+    }
+    return parsed;
+  } catch (err) {
+    log("positions_warn", `Failed to parse paper positions: ${err.message}`);
+    return [];
+  }
+}
+
+export async function savePaperPositions(targetPath, data) {
+  const fs = await import("fs");
+  const path = await import("path");
+  try {
+    const dataDir = path.dirname(targetPath);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(targetPath, JSON.stringify(data, null, 2), "utf8");
+  } catch (err) {
+    log("positions_error", `Failed to save paper positions: ${err.message}`);
+  }
 }

@@ -1719,6 +1719,123 @@ test("index.js passes node --check after Ops-8.4-Lite edits", () => {
   execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+console.log("\nGroup 18: Paper Mode Offline Storage Protection\n");
+
+await testAsync("Paper storage: getMyPositions handles missing file", async () => {
+  setEnv({ DRY_RUN: "true", EXECUTION_MODE: "paper" });
+  const fs = await import("fs");
+  const path = await import("path");
+  const { fileURLToPath } = await import("url");
+  const activePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "paper_active_positions.json");
+  if (fs.existsSync(activePath)) fs.unlinkSync(activePath);
+  
+  const { getMyPositions } = await import("../tools/dlmm.js");
+  const result = await getMyPositions({ silent: true, force: true });
+  assert.strictEqual(result.total_positions, 0);
+  assert.strictEqual(result.positions.length, 0);
+});
+
+await testAsync("Paper storage: getMyPositions handles empty file", async () => {
+  setEnv({ DRY_RUN: "true", EXECUTION_MODE: "paper" });
+  const fs = await import("fs");
+  const path = await import("path");
+  const { fileURLToPath } = await import("url");
+  const activePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "paper_active_positions.json");
+  fs.writeFileSync(activePath, "   ", "utf8");
+  
+  const { getMyPositions } = await import("../tools/dlmm.js");
+  const result = await getMyPositions({ silent: true, force: true });
+  assert.strictEqual(result.total_positions, 0);
+  assert.strictEqual(result.positions.length, 0);
+});
+
+await testAsync("Paper storage: getMyPositions handles invalid JSON", async () => {
+  setEnv({ DRY_RUN: "true", EXECUTION_MODE: "paper" });
+  const fs = await import("fs");
+  const path = await import("path");
+  const { fileURLToPath } = await import("url");
+  const activePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "paper_active_positions.json");
+  fs.writeFileSync(activePath, "{ bad json", "utf8");
+  
+  const { getMyPositions } = await import("../tools/dlmm.js");
+  const result = await getMyPositions({ silent: true, force: true });
+  assert.strictEqual(result.total_positions, 0);
+  assert.strictEqual(result.positions.length, 0);
+});
+
+await testAsync("Paper storage: getMyPositions handles empty array JSON", async () => {
+  setEnv({ DRY_RUN: "true", EXECUTION_MODE: "paper" });
+  const fs = await import("fs");
+  const path = await import("path");
+  const { fileURLToPath } = await import("url");
+  const activePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "paper_active_positions.json");
+  fs.writeFileSync(activePath, "[]", "utf8");
+  
+  const { getMyPositions } = await import("../tools/dlmm.js");
+  const result = await getMyPositions({ silent: true, force: true });
+  assert.strictEqual(result.total_positions, 0);
+  assert.strictEqual(result.positions.length, 0);
+});
+
+await testAsync("Paper storage: closePosition handles missing file gracefully", async () => {
+  setEnv({ DRY_RUN: "true", EXECUTION_MODE: "paper" });
+  const fs = await import("fs");
+  const path = await import("path");
+  const { fileURLToPath } = await import("url");
+  const activePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "paper_active_positions.json");
+  if (fs.existsSync(activePath)) fs.unlinkSync(activePath);
+  
+  const { closePosition } = await import("../tools/dlmm.js");
+  const result = await closePosition({ position_address: "fake_id" });
+  assert.strictEqual(result.success, false);
+  assert.ok(result.error.includes("not found"));
+});
+
+await testAsync("Paper storage: deploy, getMyPositions, close end-to-end simulation offline", async () => {
+  setEnv({ DRY_RUN: "true", EXECUTION_MODE: "paper" });
+  const fs = await import("fs");
+  const path = await import("path");
+  const { fileURLToPath } = await import("url");
+  const activePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "paper_active_positions.json");
+  const archivePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "paper_archive.json");
+  if (fs.existsSync(activePath)) fs.unlinkSync(activePath);
+  if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+  
+  // We simulate what deployPosition would do without hitting RPC
+  const { savePaperPositions, loadPaperPositions, getMyPositions, closePosition } = await import("../tools/dlmm.js");
+  
+  const syntheticId = `paper_${Date.now()}_EUmfCSS`;
+  const newPaperPosition = {
+    position: syntheticId,
+    pool: "EUmfCSSSLoDCwG667B4ApnNhWh76r1ebqiuAJjVnXkNH",
+    pair: "UNKNOWN-PAIR",
+    base_mint: "11111111111111111111111111111111",
+    pnl_usd: 0,
+    pnl_pct: 0
+  };
+  
+  await savePaperPositions(activePath, [newPaperPosition]);
+  
+  // 1. check it appears in getMyPositions
+  const getResult = await getMyPositions({ silent: true, force: true });
+  assert.strictEqual(getResult.total_positions, 1);
+  assert.strictEqual(getResult.positions[0].position, syntheticId);
+  
+  // 2. check it can be closed
+  const closeResult = await closePosition({ position_address: syntheticId, reason: "Offline Test" });
+  assert.strictEqual(closeResult.success, true);
+  
+  // 3. check removed from active
+  const activeAfter = await loadPaperPositions(activePath);
+  assert.strictEqual(activeAfter.length, 0);
+  
+  // 4. check appended to archive
+  const archiveAfter = await loadPaperPositions(archivePath);
+  assert.strictEqual(archiveAfter.length, 1);
+  assert.strictEqual(archiveAfter[0].position, syntheticId);
+  assert.strictEqual(archiveAfter[0].close_reason, "Offline Test");
+});
+
 restoreEnv();
 
 

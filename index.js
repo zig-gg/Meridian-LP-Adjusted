@@ -7,7 +7,8 @@ import { agentLoop, isLlmEnabled, getLlmDisabledMessage } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
-import { getTopCandidates } from "./tools/screening.js";
+import { getTopCandidates, degenScore } from "./tools/screening.js";
+
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
 import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
@@ -2702,15 +2703,19 @@ function fmtPct(value) {
 
 function getLoneCandidateSkipReason({ pool, sw, n, ti } = {}) {
   if (!pool) return "missing candidate data";
-  const smartWalletCount = Math.max(sw?.in_pool?.length ?? 0, Number(pool.gmgn_smart_wallets ?? 0) || 0);
   const tokenInfo = ti || {};
   const hasNarrative = !!n?.narrative;
+  // Degen Score is the conviction signal for a solo deploy. Smart wallet is NO LONGER a
+  // gate here — it's a confidence boost surfaced to the LLM, not a requirement.
+  const degen = degenScore(pool, config.opportunity);
+  const degenStrong = degen >= (config.screening.loneCandidateMinDegen ?? 50);
   const globalFeesSol = Number(tokenInfo.global_fees_sol ?? pool.gmgn_total_fee_sol);
   const top10Pct = Number(tokenInfo.audit?.top_holders_pct ?? pool.gmgn_token_info_top10_pct ?? pool.gmgn_top10_holder_pct);
   const botPct = Number(tokenInfo.audit?.bot_holders_pct ?? pool.gmgn_bot_degen_pct);
+
+  // Hard fundamental gates — no override.
   if (pool.is_wash) return "wash trading was flagged";
-  if (pool.is_rugpull && smartWalletCount === 0) return "rugpull risk was flagged and no smart wallets offset it";
-  if (pool.is_pvp && smartWalletCount === 0) return "PVP symbol conflict and no smart-wallet confirmation";
+  if (pool.is_rugpull && !degenStrong) return "rugpull risk was flagged without strong degen conviction";
   if (Number.isFinite(globalFeesSol) && globalFeesSol < config.screening.minTokenFeesSol) {
     return `token fees ${globalFeesSol} SOL below minimum ${config.screening.minTokenFeesSol} SOL`;
   }
@@ -2720,7 +2725,15 @@ function getLoneCandidateSkipReason({ pool, sw, n, ti } = {}) {
   if (Number.isFinite(botPct) && botPct > config.screening.maxBotHoldersPct) {
     return `bot holders ${botPct}% above maximum ${config.screening.maxBotHoldersPct}%`;
   }
-  if (!hasNarrative && smartWalletCount === 0) return "only candidate has no narrative and no smart-wallet confirmation";
+
+  // PVP conflict needs strong conviction (degen) to deploy solo.
+  if (pool.is_pvp && !degenStrong) {
+    return `PVP symbol conflict without strong degen conviction (degen ${degen.toFixed(1)} < ${config.screening.loneCandidateMinDegen ?? 50})`;
+  }
+  // Conviction: a solo deploy needs a narrative OR a strong degen score.
+  if (!hasNarrative && !degenStrong) {
+    return `only candidate has no narrative and weak degen score (${degen.toFixed(1)} < ${config.screening.loneCandidateMinDegen ?? 50})`;
+  }
   return null;
 }
 

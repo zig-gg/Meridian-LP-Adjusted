@@ -21,6 +21,8 @@ import { blockDev, unblockDev, listBlockedDevs } from "../dev-blocklist.js";
 import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
 import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW } from "../config.js";
+import { scaleScreeningToTimeframe, normalizeTimeframe } from "../screening-scales.js";
+
 import { getRecentDecisions } from "../decision-log.js";
 import { scanPools } from "./scanner.js";
 import {
@@ -585,8 +587,20 @@ const toolMap = {
       }
     }
 
+    // Auto-scale fee/volume when timeframe changes (unless user set them explicitly in same call).
+    if (applied.timeframe != null && applied.minFeeActiveTvlRatio == null && applied.minVolume == null) {
+      const tf = normalizeTimeframe(applied.timeframe);
+      applied.timeframe = tf;
+      const scaled = scaleScreeningToTimeframe(tf);
+      applied.minFeeActiveTvlRatio = scaled.minFeeActiveTvlRatio;
+      applied.minVolume = scaled.minVolume;
+      applied._timeframeScaled = true;
+      log("config", `timeframe ${tf} → auto-scaled minFeeActiveTvlRatio=${scaled.minFeeActiveTvlRatio}, minVolume=${scaled.minVolume}`);
+    }
+
     // Apply to live config immediately after the persisted config is known-good.
     for (const [key, val] of Object.entries(applied)) {
+      if (key.startsWith("_")) continue;
       const [section, field] = CONFIG_MAP[key];
       const before = config[section][field];
       config[section][field] = val;
@@ -610,6 +624,7 @@ const toolMap = {
     }
 
     for (const [key, val] of Object.entries(applied)) {
+      if (key.startsWith("_")) continue;
       const persistPath = CONFIG_MAP[key]?.[2];
       if (Array.isArray(persistPath) && persistPath.length > 0) {
         let target = userConfig;

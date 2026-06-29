@@ -59,35 +59,70 @@ function scoreCandidate(pool) {
  */
 export function degenScore(pool, targets = {}) {
   const {
-    targetVolRatio = 20,    // (30m) volume/active_tvl that earns a full trading sub-score
-    targetLpCount = 40,     // (30m) unique_lps + positions_created for a full LP sub-score
-    targetFeeRatio = 0.20,  // (30m) fee/active_tvl for a full fee sub-score
-    targetLiquidity = 20000, // active_tvl ($) floor for full liquidity sub-score (not timeframe-scaled)
+    targetVolRatio = 20,
+    targetParticipation = 120,
+    targetFeeRatio = 0.20,
+    targetLiquidity = 20000,
   } = targets;
 
   const La = Number(pool.active_tvl ?? pool.tvl ?? 0);
+
   if (!Number.isFinite(La) || La <= 0) return 0;
 
-  const clamp01 = (x) => (Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0);
+  const clamp01 = (x) =>
+    Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0;
 
-  // Normalize window-dependent inputs to the 30m reference (rate × scale).
-  const tfMinutes = TIMEFRAME_MINUTES[config.screening.timeframe] || DEGEN_REFERENCE_MINUTES;
+  const tfMinutes =
+    TIMEFRAME_MINUTES[config.screening.timeframe] ??
+    DEGEN_REFERENCE_MINUTES;
+
   const tfScale = DEGEN_REFERENCE_MINUTES / tfMinutes;
 
-  const volRatio = Number(pool.volume_active_tvl_ratio);
-  const tradingRatio = (Number.isFinite(volRatio) ? volRatio : Number(pool.volume_window || 0) / La) * tfScale;
-  const feeRatio = (Number.isFinite(Number(pool.fee_active_tvl_ratio))
-    ? Number(pool.fee_active_tvl_ratio)
-    : Number(pool.fee_window || 0) / La) * tfScale;
-  const lpActivity = (Number(pool.unique_lps || 0) + Number(pool.positions_created || 0)) * tfScale;
+  //
+  // Trading activity
+  //
+  const tradingRatio =
+    (Number(pool.volume_window || 0) / La) * tfScale;
 
+  //
+  // LP participation
+  //
+  const participation =
+    (Number(pool.active_positions || 0) +
+      Number(pool.unique_traders || 0)) * tfScale;
+
+  //
+  // Fee efficiency
+  //
+  const feeRatio =
+    Number(pool.fee_active_tvl_ratio || 0) * tfScale;
+
+  //
+  // Subscores
+  //
   const sTrading = clamp01(tradingRatio / targetVolRatio);
-  const sLp      = clamp01(lpActivity / targetLpCount);
-  const sFees    = clamp01(feeRatio / targetFeeRatio);
-  const sLiq     = clamp01(Math.log10(La) / Math.log10(targetLiquidity));
 
-  // Geometric mean (×100). Any zero sub-score → 0, enforcing balance across all four.
-  return (sTrading * sLp * sFees * sLiq) ** 0.25 * 100;
+  const sParticipation = clamp01(
+    participation / targetParticipation
+  );
+
+  const sFees = clamp01(
+    feeRatio / targetFeeRatio
+  );
+
+  const sLiquidity = clamp01(
+    Math.log10(La) / Math.log10(targetLiquidity)
+  );
+
+  return (
+    Math.pow(
+      sTrading *
+      sParticipation *
+      sFees *
+      sLiquidity,
+      0.25
+    ) * 100
+  );
 }
 
 function numeric(value) {
@@ -427,6 +462,7 @@ async function refreshDiscordOnlyPools(pools, timeframe) {
   }
 }
 
+
 /**
  * Fetch pools from the Meteora Pool Discovery API.
  * Returns condensed data optimized for LLM consumption (saves tokens).
@@ -458,6 +494,11 @@ export async function discoverPools({
       ? `base_token_launchpad=[${s.allowedLaunchpads.join(",")}]`
       : null,
   ].filter(Boolean).join("&&");
+
+  console.log("FILTERS:");
+  console.log(filters);
+  console.log("TIMEFRAME:", s.timeframe);
+  console.log("CATEGORY:", s.category);
 
   const data = await fetchPoolDiscoveryPage({
     page_size,

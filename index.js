@@ -2708,6 +2708,7 @@ function getLoneCandidateSkipReason({ pool, sw, n, ti } = {}) {
   // Degen Score is the conviction signal for a solo deploy. Smart wallet is NO LONGER a
   // gate here — it's a confidence boost surfaced to the LLM, not a requirement.
   const degen = degenScore(pool, config.opportunity);
+  console.log("DEGEN SCORE:", pool.name, degen);
   const degenStrong = degen >= (config.screening.loneCandidateMinDegen ?? 50);
   const globalFeesSol = Number(tokenInfo.global_fees_sol ?? pool.gmgn_total_fee_sol);
   const top10Pct = Number(tokenInfo.audit?.top_holders_pct ?? pool.gmgn_token_info_top10_pct ?? pool.gmgn_top10_holder_pct);
@@ -2939,6 +2940,7 @@ Commands:
       const s = config.screening;
       console.log("\nCurrent screening thresholds:");
       console.log(`  minFeeActiveTvlRatio: ${s.minFeeActiveTvlRatio}`);
+      console.log(JSON.stringify(s, null, 2));
       console.log(`  minOrganic:           ${s.minOrganic}`);
       console.log(`  minHolders:           ${s.minHolders}`);
       console.log(`  minTvl:               ${s.minTvl}`);

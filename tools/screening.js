@@ -220,7 +220,12 @@ async function fetchPoolDiscoveryPage({ page_size, filters, timeframe, category 
     throw new Error(`Pool Discovery API error: ${res.status} ${res.statusText}`);
   }
 
-  return res.json();
+  const data = await res.json();
+
+  // Ops-9: log raw response envelope keys once per fetch for discoverability
+  log("discovery", `Pool Discovery API response keys: ${JSON.stringify(Object.keys(data))} | scan_count=${data.scan_count ?? "?"} count=${data.count ?? "?"} total=${data.total ?? "?"}`);
+
+  return data;
 }
 
 async function fetchPoolDiscoveryDetail({ poolAddress, timeframe }) {
@@ -594,7 +599,11 @@ export async function discoverPools({
   }
 
   return {
-    total: data.total,
+    // scan_count = total DLMM pools scanned by the API (the full universe, pre-filter)
+    // count      = pools returned after applying filter_by params
+    // Older API versions used `total` — fall back gracefully if the shape changes again.
+    total: data.scan_count ?? data.total ?? null,
+    api_count: data.count ?? null,
     pools,
     filtered_examples: filteredExamples,
   };
@@ -880,7 +889,8 @@ export async function getTopCandidates({ limit = 10 } = {}) {
 
   return {
     candidates: eligible,
-    total_screened: pools.length,
+    // total_screened = pools returned by the API after filter_by (pre-code-side filtering)
+    total_screened: discovery.api_count ?? pools.length,
     filtered_examples: filteredOut.slice(0, 3),
     api_health,
     eligible_before_slice,

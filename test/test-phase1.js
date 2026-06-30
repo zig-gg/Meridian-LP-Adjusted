@@ -1922,7 +1922,59 @@ test("index.js passes node --check after Ops-8.4 edits", () => {
   execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+// ── Group 20: Ops-9 Discovery Field Mapping ───────────────────────────────────
+
+console.log("\nGroup 20: Ops-9 Discovery Field Mapping\n");
+
+test("Ops-9 Test 1: discoverPools returns total mapped from scan_count with fallback", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  // The return block of discoverPools must map scan_count (not raw data.total alone)
+  const fnIdx = content.indexOf("export async function discoverPools(");
+  assert.ok(fnIdx >= 0, "discoverPools must be exported");
+  const returnIdx = content.indexOf("return {", fnIdx);
+  assert.ok(returnIdx >= 0, "discoverPools must have a return block");
+  const returnBlock = content.slice(returnIdx, content.indexOf("};", returnIdx) + 2);
+  assert.ok(returnBlock.includes("scan_count"), "discoverPools return must reference scan_count");
+  assert.ok(returnBlock.includes("data.count"), "discoverPools return must reference data.count for api_count");
+  assert.ok(returnBlock.includes("api_count"), "discoverPools must expose api_count field");
+});
+
+test("Ops-9 Test 2: getTopCandidates total_screened uses api_count not pools.length alone", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  const fnIdx = content.indexOf("export async function getTopCandidates(");
+  assert.ok(fnIdx >= 0, "getTopCandidates must be exported");
+  const returnIdx = content.lastIndexOf("return {", fnIdx + content.slice(fnIdx).indexOf("\n}") + 2);
+  const searchFrom = content.indexOf("return {", fnIdx);
+  const returnBlock = content.slice(searchFrom, content.indexOf("};", searchFrom) + 2);
+  assert.ok(returnBlock.includes("api_count"), "getTopCandidates return must use api_count for total_screened");
+  assert.ok(!returnBlock.includes("total_screened: pools.length"), "total_screened must not be hardcoded to pools.length alone");
+});
+
+test("Ops-9 Test 3: fetchPoolDiscoveryPage emits diagnostic log with scan_count and count", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  const fnIdx = content.indexOf("async function fetchPoolDiscoveryPage(");
+  assert.ok(fnIdx >= 0, "fetchPoolDiscoveryPage must exist");
+  const fnBody = content.slice(fnIdx, fnIdx + 800);
+  assert.ok(fnBody.includes("scan_count"), "fetchPoolDiscoveryPage must log scan_count for diagnostics");
+  assert.ok(fnBody.includes("log("), "fetchPoolDiscoveryPage must emit a log call");
+});
+
+test("Ops-9 Test 4: stage_api_total in index.js reads from discovery.total (now scan_count)", () => {
+  const content = readFileSync("index.js", "utf8");
+  // funnelSnapshot must use topCandidates?.total for stage_api_total
+  const snapIdx = content.indexOf("const funnelSnapshot = {");
+  assert.ok(snapIdx >= 0, "funnelSnapshot must be defined");
+  const snapBlock = content.slice(snapIdx, content.indexOf("};", snapIdx) + 2);
+  assert.ok(snapBlock.includes("stage_api_total") && snapBlock.includes("?.total"),
+    "stage_api_total must read from topCandidates?.total");
+});
+
+test("Ops-9 Test 5: tools/screening.js passes node --check after Ops-9 edits", () => {
+  execSync("node --check tools/screening.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
+
 
 
 

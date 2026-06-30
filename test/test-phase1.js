@@ -1967,7 +1967,65 @@ test("Ops-9 Test 5: tools/screening.js passes node --check after Ops-9 edits", (
   execSync("node --check tools/screening.js", { cwd: process.cwd(), stdio: "pipe" });
 });
 
+// ── Group 21: Ops-9b Discovery maxMcap Calibration ───────────────────────────
+
+console.log("\nGroup 21: Ops-9b Discovery maxMcap Calibration\n");
+
+test("Ops-9b Test 1: config.js default maxMcap is 100_000_000 (not 10_000_000)", () => {
+  const content = readFileSync("config.js", "utf8");
+  // The default must be the 10x-raised value
+  assert.ok(content.includes("100_000_000") || content.includes("100000000"),
+    "config.js maxMcap default must be 100_000_000");
+  // The old value must be gone from the default line
+  const maxMcapLine = content.match(/maxMcap\s*:.*\?\?.*$/m)?.[0] ?? "";
+  assert.ok(!maxMcapLine.includes("10_000_000") && !maxMcapLine.includes("10000000"),
+    "config.js maxMcap default line must NOT contain the old 10_000_000 value");
+});
+
+test("Ops-9b Test 2: maxMcap default (100M) is higher than observed trending pool mcap range (38-46M)", () => {
+  // Documented from live API probe on 2026-06-30:
+  // trending pools passed all other filters at mcaps: 46015124, 42791019, 37800148
+  // The default maxMcap must be above the highest observed value
+  const observedMaxMcap = 46_015_124;
+  const configDefault = 100_000_000;
+  assert.ok(configDefault > observedMaxMcap,
+    `maxMcap default ${configDefault} must exceed observed trending pool mcap ${observedMaxMcap}`);
+  // And below mega-cap threshold (stays a safety net against blue-chips)
+  assert.ok(configDefault <= 500_000_000,
+    "maxMcap default must remain below 500M (preserve mega-cap exclusion intent)");
+});
+
+test("Ops-9b Test 3: minMcap (150K) is still well below maxMcap (100M) — no inverted range", () => {
+  const content = readFileSync("config.js", "utf8");
+  const minLine = content.match(/minMcap\s*:.*\?\?.*$/m)?.[0] ?? "";
+  const maxLine = content.match(/maxMcap\s*:.*\?\?.*$/m)?.[0] ?? "";
+  // Both must be present and in the right ballpark
+  assert.ok(minLine.includes("150_000") || minLine.includes("150000"),
+    "minMcap must remain 150_000");
+  assert.ok(maxLine.includes("100_000_000") || maxLine.includes("100000000"),
+    "maxMcap must be 100_000_000");
+});
+
+test("Ops-9b Test 4: getRawPoolScreeningRejectReason rejects pools above maxMcap", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  // The screening filter must still enforce the upper mcap bound
+  assert.ok(content.includes("mcap > s.maxMcap") || content.includes("mcap > s.maxMcap"),
+    "screening.js must enforce maxMcap upper bound");
+});
+
+test("Ops-9b Test 5: discoverPools filter_by string includes base_token_market_cap upper bound", () => {
+  const content = readFileSync("tools/screening.js", "utf8");
+  // The discovery API filter must include the maxMcap cap
+  assert.ok(content.includes("base_token_market_cap<=") || content.includes("base_token_market_cap<=${"),
+    "discoverPools must include base_token_market_cap upper bound in filter_by");
+});
+
+test("Ops-9b Test 6: config.js passes node --check after Ops-9b edit", () => {
+  execSync("node --check config.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
+
 
 
 

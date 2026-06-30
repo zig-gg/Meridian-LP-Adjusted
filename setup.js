@@ -12,7 +12,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, "user-config.json");
-const ENV_PATH    = path.join(__dirname, ".env");
+const ENV_PATH = path.join(__dirname, ".env");
 
 const DEFAULT_MODEL = "openai/gpt-oss-20b:free";
 
@@ -33,9 +33,9 @@ function askNum(question, defaultVal, { min, max } = {}) {
     while (true) {
       const raw = await ask(question, defaultVal);
       const n = parseFloat(raw);
-      if (isNaN(n))                        { console.log(`  ⚠ Please enter a number.`); continue; }
-      if (min !== undefined && n < min)    { console.log(`  ⚠ Minimum is ${min}.`);     continue; }
-      if (max !== undefined && n > max)    { console.log(`  ⚠ Maximum is ${max}.`);     continue; }
+      if (isNaN(n)) { console.log(`  ⚠ Please enter a number.`); continue; }
+      if (min !== undefined && n < min) { console.log(`  ⚠ Minimum is ${min}.`); continue; }
+      if (max !== undefined && n > max) { console.log(`  ⚠ Maximum is ${max}.`); continue; }
       resolve(n);
       break;
     }
@@ -48,8 +48,8 @@ function askBool(question, defaultVal) {
       const hint = defaultVal ? "Y/n" : "y/N";
       const raw = await ask(`${question} [${hint}]`, "");
       if (raw === "") { resolve(defaultVal); break; }
-      if (/^y(es)?$/i.test(raw)) { resolve(true);  break; }
-      if (/^n(o)?$/i.test(raw))  { resolve(false); break; }
+      if (/^y(es)?$/i.test(raw)) { resolve(true); break; }
+      if (/^n(o)?$/i.test(raw)) { resolve(false); break; }
       console.log("  ⚠ Enter y or n.");
     }
   });
@@ -85,42 +85,42 @@ function buildEnv(map) {
 // ─── Presets ──────────────────────────────────────────────────────────────────
 const PRESETS = {
   degen: {
-    label:                 "Degen",
-    timeframe:             "30m",
-    minOrganic:            60,
-    minHolders:            200,
-    maxMcap:               5_000_000,
-    takeProfitFeePct:      10,
-    stopLossPct:           -25,
+    label: "Degen",
+    timeframe: "30m",
+    minOrganic: 60,
+    minHolders: 200,
+    maxMcap: 5_000_000,
+    takeProfitFeePct: 10,
+    stopLossPct: -25,
     outOfRangeWaitMinutes: 15,
     managementIntervalMin: 5,
-    screeningIntervalMin:  15,
+    screeningIntervalMin: 15,
     description: "30m timeframe, pumping tokens allowed, fast cycles. High risk/reward.",
   },
   moderate: {
-    label:                 "Moderate",
-    timeframe:             "4h",
-    minOrganic:            65,
-    minHolders:            500,
-    maxMcap:               100_000_000,
-    takeProfitFeePct:      5,
-    stopLossPct:           -15,
+    label: "Moderate",
+    timeframe: "4h",
+    minOrganic: 65,
+    minHolders: 500,
+    maxMcap: 10_000_000,
+    takeProfitFeePct: 5,
+    stopLossPct: -15,
     outOfRangeWaitMinutes: 30,
     managementIntervalMin: 10,
-    screeningIntervalMin:  30,
+    screeningIntervalMin: 30,
     description: "4h timeframe, balanced risk/reward. Recommended for most users.",
   },
   safe: {
-    label:                 "Safe",
-    timeframe:             "24h",
-    minOrganic:            75,
-    minHolders:            1000,
-    maxMcap:               100_000_000,
-    takeProfitFeePct:      3,
-    stopLossPct:           -10,
+    label: "Safe",
+    timeframe: "24h",
+    minOrganic: 75,
+    minHolders: 1000,
+    maxMcap: 10_000_000,
+    takeProfitFeePct: 3,
+    stopLossPct: -10,
     outOfRangeWaitMinutes: 60,
     managementIntervalMin: 15,
-    screeningIntervalMin:  60,
+    screeningIntervalMin: 60,
     description: "24h timeframe, stable pools only, avoids pumps. Lower yield, lower risk.",
   },
 };
@@ -133,7 +133,7 @@ const existingEnv = fs.existsSync(ENV_PATH)
   ? parseEnv(fs.readFileSync(ENV_PATH, "utf8"))
   : {};
 
-const e  = (key, fallback) => existingConfig[key] ?? fallback;
+const e = (key, fallback) => existingConfig[key] ?? fallback;
 const ev = (key, fallback) => existingEnv[key] ?? fallback;
 
 // ─── Banner ────────────────────────────────────────────────────────────────────
@@ -187,10 +187,10 @@ const telegramChatId = await ask(
 
 // ─── Section 3: Preset ────────────────────────────────────────────────────────
 const presetChoice = await askChoice("Select a risk preset:", [
-  { label: `🔥 Degen    — ${PRESETS.degen.description}`,    key: "degen"    },
+  { label: `🔥 Degen    — ${PRESETS.degen.description}`, key: "degen" },
   { label: `⚖️  Moderate — ${PRESETS.moderate.description}`, key: "moderate" },
-  { label: `🛡️  Safe     — ${PRESETS.safe.description}`,     key: "safe"     },
-  { label: "⚙️  Custom   — Configure every setting manually", key: "custom"  },
+  { label: `🛡️  Safe     — ${PRESETS.safe.description}`, key: "safe" },
+  { label: "⚙️  Custom   — Configure every setting manually", key: "custom" },
 ]);
 
 const preset = presetChoice.key === "custom" ? null : PRESETS[presetChoice.key];
@@ -267,7 +267,7 @@ const minHolders = await askNum(
 
 const maxMcap = await askNum(
   "Max token market cap USD",
-  p("maxMcap", 100_000_000),
+  p("maxMcap", 10_000_000),
   { min: 100_000 }
 );
 
@@ -340,36 +340,36 @@ console.log("\n── LLM Provider ───────────────
 
 const LLM_PROVIDERS = [
   {
-    label:   "OpenRouter   (openrouter.ai — many models)",
-    key:     "openrouter",
+    label: "OpenRouter   (openrouter.ai — many models)",
+    key: "openrouter",
     baseUrl: "https://openrouter.ai/api/v1",
     keyHint: "sk-or-...",
     modelDefault: "nousresearch/hermes-3-llama-3.1-405b",
   },
   {
-    label:   "MiniMax      (api.minimax.io)",
-    key:     "minimax",
+    label: "MiniMax      (api.minimax.io)",
+    key: "minimax",
     baseUrl: "https://api.minimax.io/v1",
     keyHint: "your MiniMax API key",
     modelDefault: "MiniMax-Text-01",
   },
   {
-    label:   "OpenAI       (api.openai.com)",
-    key:     "openai",
+    label: "OpenAI       (api.openai.com)",
+    key: "openai",
     baseUrl: "https://api.openai.com/v1",
     keyHint: "sk-...",
     modelDefault: "gpt-4o",
   },
   {
-    label:   "Local / LM Studio / Ollama (OpenAI-compatible)",
-    key:     "local",
+    label: "Local / LM Studio / Ollama (OpenAI-compatible)",
+    key: "local",
     baseUrl: "http://localhost:1234/v1",
     keyHint: "(leave blank or type any value)",
     modelDefault: "local-model",
   },
   {
-    label:   "Custom       (any OpenAI-compatible endpoint)",
-    key:     "custom",
+    label: "Custom       (any OpenAI-compatible endpoint)",
+    key: "custom",
     baseUrl: "",
     keyHint: "your API key",
     modelDefault: "",
@@ -386,7 +386,7 @@ if (provider.key === "local" || provider.key === "custom") {
 
 const llmApiKeyExisting = e("llmApiKey", existingEnv.LLM_API_KEY || existingEnv.OPENROUTER_API_KEY || "");
 const llmApiKeyRaw = await ask("API Key", llmApiKeyExisting ? "*** (already set)" : (provider.keyHint || ""));
-const llmApiKey   = llmApiKeyRaw.startsWith("***") ? llmApiKeyExisting : llmApiKeyRaw;
+const llmApiKey = llmApiKeyRaw.startsWith("***") ? llmApiKeyExisting : llmApiKeyRaw;
 
 const llmModel = await ask(
   "Model name",
@@ -401,11 +401,11 @@ const isKept = (val) => !val || val.startsWith("***");
 const envMap = {
   ...existingEnv,
   ...(isKept(openrouterKey) ? {} : { OPENROUTER_API_KEY: openrouterKey }),
-  ...(isKept(walletKey)     ? {} : { WALLET_PRIVATE_KEY: walletKey }),
-  ...(rpcUrl                ? { RPC_URL: rpcUrl } : {}),
-  ...(isKept(heliusKey)     ? {} : { HELIUS_API_KEY: heliusKey }),
+  ...(isKept(walletKey) ? {} : { WALLET_PRIVATE_KEY: walletKey }),
+  ...(rpcUrl ? { RPC_URL: rpcUrl } : {}),
+  ...(isKept(heliusKey) ? {} : { HELIUS_API_KEY: heliusKey }),
   ...(isKept(telegramToken) ? {} : { TELEGRAM_BOT_TOKEN: telegramToken }),
-  ...(telegramChatId        ? { TELEGRAM_CHAT_ID: telegramChatId } : {}),
+  ...(telegramChatId ? { TELEGRAM_CHAT_ID: telegramChatId } : {}),
   DRY_RUN: dryRun ? "true" : "false",
 };
 fs.writeFileSync(ENV_PATH, buildEnv(envMap));

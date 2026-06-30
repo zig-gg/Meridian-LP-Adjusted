@@ -2028,36 +2028,36 @@ test("Ops-9b Test 6: config.js passes node --check after Ops-9b edit", () => {
 
 console.log("\nGroup 22: Ops-9c Config Precedence — setup.js alignment\n");
 
-test("Ops-9c Test 1: setup.js moderate preset maxMcap is 100_000_000", () => {
+test("Ops-9c Test 1: setup.js moderate preset maxMcap is 10_000_000", () => {
   const content = readFileSync("setup.js", "utf8");
   // Find the moderate preset block and assert its maxMcap
   const moderateIdx = content.indexOf("moderate: {");
   assert.ok(moderateIdx >= 0, "setup.js must define moderate preset");
   const moderateBlock = content.slice(moderateIdx, content.indexOf("},", moderateIdx) + 2);
-  assert.ok(moderateBlock.includes("100_000_000") || moderateBlock.includes("100000000"),
-    "setup.js moderate preset maxMcap must be 100_000_000");
-  assert.ok(!moderateBlock.includes("10_000_000") && !moderateBlock.includes(": 10000000"),
-    "setup.js moderate preset must NOT contain 10_000_000");
+  assert.ok(moderateBlock.includes("10_000_000") || moderateBlock.includes("10000000"),
+    "setup.js moderate preset maxMcap must be 10_000_000");
+  assert.ok(!moderateBlock.includes("100_000_000") && !moderateBlock.includes(": 100000000"),
+    "setup.js moderate preset must NOT contain 100_000_000");
 });
 
-test("Ops-9c Test 2: setup.js safe preset maxMcap is 100_000_000", () => {
+test("Ops-9c Test 2: setup.js safe preset maxMcap is 10_000_000", () => {
   const content = readFileSync("setup.js", "utf8");
   const safeIdx = content.indexOf("safe: {");
   assert.ok(safeIdx >= 0, "setup.js must define safe preset");
   const safeBlock = content.slice(safeIdx, content.indexOf("},", safeIdx) + 2);
-  assert.ok(safeBlock.includes("100_000_000") || safeBlock.includes("100000000"),
-    "setup.js safe preset maxMcap must be 100_000_000");
-  assert.ok(!safeBlock.includes("10_000_000") && !safeBlock.includes(": 10000000"),
-    "setup.js safe preset must NOT contain 10_000_000");
+  assert.ok(safeBlock.includes("10_000_000") || safeBlock.includes("10000000"),
+    "setup.js safe preset maxMcap must be 10_000_000");
+  assert.ok(!safeBlock.includes("100_000_000") && !safeBlock.includes(": 100000000"),
+    "setup.js safe preset must NOT contain 100_000_000");
 });
 
-test("Ops-9c Test 3: setup.js wizard default for maxMcap is 100_000_000", () => {
+test("Ops-9c Test 3: setup.js wizard default for maxMcap is 10_000_000", () => {
   const content = readFileSync("setup.js", "utf8");
-  // The askNum call for maxMcap must use 100_000_000 as the fallback default, not 10_000_000
-  assert.ok(content.includes('p("maxMcap", 100_000_000)') || content.includes("p('maxMcap', 100_000_000)"),
-    "setup.js wizard maxMcap prompt must default to 100_000_000");
-  assert.ok(!content.includes('p("maxMcap", 10_000_000)') && !content.includes("p('maxMcap', 10_000_000)"),
-    "setup.js wizard maxMcap prompt must NOT default to 10_000_000");
+  // The askNum call for maxMcap must use 10_000_000 as the fallback default, not 100_000_000
+  assert.ok(content.includes('p("maxMcap", 10_000_000)') || content.includes("p('maxMcap', 10_000_000)"),
+    "setup.js wizard maxMcap prompt must default to 10_000_000");
+  assert.ok(!content.includes('p("maxMcap", 100_000_000)') && !content.includes("p('maxMcap', 100_000_000)"),
+    "setup.js wizard maxMcap prompt must NOT default to 100_000_000");
 });
 
 test("Ops-9c Test 4: user-config.example.json maxMcap is 100000000", () => {

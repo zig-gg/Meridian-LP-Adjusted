@@ -102,7 +102,7 @@ const PRESETS = {
     timeframe:             "4h",
     minOrganic:            65,
     minHolders:            500,
-    maxMcap:               10_000_000,
+    maxMcap:               100_000_000,
     takeProfitFeePct:      5,
     stopLossPct:           -15,
     outOfRangeWaitMinutes: 30,
@@ -115,7 +115,7 @@ const PRESETS = {
     timeframe:             "24h",
     minOrganic:            75,
     minHolders:            1000,
-    maxMcap:               10_000_000,
+    maxMcap:               100_000_000,
     takeProfitFeePct:      3,
     stopLossPct:           -10,
     outOfRangeWaitMinutes: 60,
@@ -267,7 +267,7 @@ const minHolders = await askNum(
 
 const maxMcap = await askNum(
   "Max token market cap USD",
-  p("maxMcap", 10_000_000),
+  p("maxMcap", 100_000_000),
   { min: 100_000 }
 );
 

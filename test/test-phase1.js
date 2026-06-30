@@ -1849,13 +1849,11 @@ test("Ops-8.4 Test 1: index.js defines buildFunnelSummaryLines helper", () => {
 });
 
 test("Ops-8.4 Test 2: buildFunnelSummaryLines returns correct labels", () => {
-  // Extract and eval buildFunnelSummaryLines from source via regex
   const content = readFileSync("index.js", "utf8");
   const fnIdx = content.indexOf("function buildFunnelSummaryLines(");
   assert.ok(fnIdx >= 0, "buildFunnelSummaryLines must exist");
-  const fnEnd = content.indexOf("\n}\n", fnIdx) + 3;
-  const fnSrc = content.slice(fnIdx, fnEnd);
-  // Verify label strings are present in function body
+  // Use a forward slice large enough to capture the function body (CRLF-safe)
+  const fnSrc = content.slice(fnIdx, fnIdx + 600);
   assert.ok(fnSrc.includes("Discovery Funnel"), "must include 'Discovery Funnel' label");
   assert.ok(fnSrc.includes("API:"), "must include 'API:' label");
   assert.ok(fnSrc.includes("Post Discover:"), "must include 'Post Discover:' label");

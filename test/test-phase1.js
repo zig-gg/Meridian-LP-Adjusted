@@ -1836,7 +1836,94 @@ await testAsync("Paper storage: deploy, getMyPositions, close end-to-end simulat
   assert.strictEqual(archiveAfter[0].close_reason, "Offline Test");
 });
 
+// ── Group 19: Ops-8.4 Full Observability Funnel ──────────────────────────────
+
+console.log("\nGroup 19: Ops-8.4 Full Observability Funnel\n");
+
+test("Ops-8.4 Test 1: index.js defines buildFunnelSummaryLines helper", () => {
+  const content = readFileSync("index.js", "utf8");
+  assert.ok(content.includes("function buildFunnelSummaryLines("), "index.js must define buildFunnelSummaryLines");
+  assert.ok(content.includes("stage_pre_slice"), "buildFunnelSummaryLines must use stage_pre_slice (eligible_before_slice)");
+  assert.ok(content.includes("stage_api_total"), "buildFunnelSummaryLines must use stage_api_total");
+  assert.ok(content.includes("stage_post_recon"), "buildFunnelSummaryLines must use stage_post_recon");
+});
+
+test("Ops-8.4 Test 2: buildFunnelSummaryLines returns correct labels", () => {
+  const content = readFileSync("index.js", "utf8");
+  const fnIdx = content.indexOf("function buildFunnelSummaryLines(");
+  assert.ok(fnIdx >= 0, "buildFunnelSummaryLines must exist");
+  // Use a forward slice large enough to capture the function body (CRLF-safe)
+  const fnSrc = content.slice(fnIdx, fnIdx + 600);
+  assert.ok(fnSrc.includes("Discovery Funnel"), "must include 'Discovery Funnel' label");
+  assert.ok(fnSrc.includes("API:"), "must include 'API:' label");
+  assert.ok(fnSrc.includes("Post Discover:"), "must include 'Post Discover:' label");
+  assert.ok(fnSrc.includes("Eligible:"), "must include 'Eligible:' label");
+  assert.ok(fnSrc.includes("Top Slice:"), "must include 'Top Slice:' label");
+  assert.ok(fnSrc.includes("Recon:"), "must include 'Recon:' label");
+});
+
+test("Ops-8.4 Test 3: index.js buildScreeningSummary return includes funnelSnapshot field", () => {
+  const content = readFileSync("index.js", "utf8");
+  // The return block of buildScreeningSummary must contain funnelSnapshot
+  const fnIdx = content.indexOf("function buildScreeningSummary(");
+  assert.ok(fnIdx >= 0, "buildScreeningSummary must exist");
+  const fnEnd = content.indexOf("\nfunction ", fnIdx + 1);
+  const fnBody = content.slice(fnIdx, fnEnd > fnIdx ? fnEnd : fnIdx + 3000);
+  assert.ok(fnBody.includes("funnelSnapshot"), "buildScreeningSummary return must contain funnelSnapshot field");
+  assert.ok(fnBody.includes("weightsSummary"), "buildScreeningSummary return must contain weightsSummary field");
+});
+
+test("Ops-8.4 Test 4: index.js buildScreeningSummary accepts weightsSummary param", () => {
+  const content = readFileSync("index.js", "utf8");
+  // The function signature must accept weightsSummary
+  const sigLine = content.match(/function buildScreeningSummary\(\{[^}]+\}/)?.[0] || "";
+  assert.ok(sigLine.includes("weightsSummary"), "buildScreeningSummary signature must include weightsSummary param");
+});
+
+test("Ops-8.4 Test 5: index.js CLI handler includes 'funnel' command", () => {
+  const content = readFileSync("index.js", "utf8");
+  // The rl.on("line") section must handle 'funnel'
+  assert.ok(content.includes('input === "funnel"') || content.includes("input === 'funnel'"),
+    "CLI handler must match funnel command");
+  assert.ok(content.includes("buildFunnelSummaryLines(_lastFunnelSnapshot)"),
+    "CLI funnel handler must call buildFunnelSummaryLines with _lastFunnelSnapshot");
+});
+
+test("Ops-8.4 Test 6: index.js CLI help text documents funnel command", () => {
+  const content = readFileSync("index.js", "utf8");
+  // The console.log help block must mention funnel
+  assert.ok(content.includes("funnel") && content.includes("Show latest discovery funnel snapshot"),
+    "CLI help text must document the funnel command");
+});
+
+test("Ops-8.4 Test 7: /funnel Telegram handler labels match spec", () => {
+  const content = readFileSync("index.js", "utf8");
+  const handlerIdx = content.indexOf('if (text === "/funnel")');
+  assert.ok(handlerIdx >= 0, "telegramHandler must handle /funnel");
+  const block = content.slice(handlerIdx, handlerIdx + 700);
+  assert.ok(block.includes("API total:"), "Telegram /funnel must print 'API total:'");
+  assert.ok(block.includes("Post-discover:"), "Telegram /funnel must print 'Post-discover:'");
+  assert.ok(block.includes("Pre-slice:"), "Telegram /funnel must print 'Pre-slice:'");
+  assert.ok(block.includes("Post-getTop:"), "Telegram /funnel must print 'Post-getTop:'");
+  assert.ok(block.includes("Post-recon:"), "Telegram /funnel must print 'Post-recon:'");
+});
+
+test("Ops-8.4 Test 8: stage_pre_slice comes from eligible_before_slice in funnelSnapshot", () => {
+  const content = readFileSync("index.js", "utf8");
+  // The funnelSnapshot construction must map eligible_before_slice -> stage_pre_slice
+  const snapIdx = content.indexOf("const funnelSnapshot = {");
+  assert.ok(snapIdx >= 0, "funnelSnapshot must be defined");
+  const snapBlock = content.slice(snapIdx, content.indexOf("};", snapIdx) + 2);
+  assert.ok(snapBlock.includes("stage_pre_slice") && snapBlock.includes("eligible_before_slice"),
+    "stage_pre_slice must be sourced from eligible_before_slice");
+});
+
+test("index.js passes node --check after Ops-8.4 edits", () => {
+  execSync("node --check index.js", { cwd: process.cwd(), stdio: "pipe" });
+});
+
 restoreEnv();
+
 
 
 

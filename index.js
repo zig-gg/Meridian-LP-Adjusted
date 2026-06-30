@@ -1229,7 +1229,7 @@ IMPORTANT:
       }
     }
   }
-  setScreeningSummary(buildScreeningSummary({ screenReport }));
+  setScreeningSummary(buildScreeningSummary({ screenReport, weightsSummary: config.darwin?.enabled ? getWeightsSummary() : null }));
   return screenReport;
 }
 
@@ -1487,7 +1487,7 @@ function getScreeningSummary() {
   return _lastScreeningSummary;
 }
 
-function buildScreeningSummary({ screenReport, passing, filteredOut, earlyFilteredExamples, result, reason }) {
+function buildScreeningSummary({ screenReport, passing, filteredOut, earlyFilteredExamples, result, reason, weightsSummary = null }) {
   const reportText = String(screenReport || "");
   const reportLower = reportText.toLowerCase();
 
@@ -1582,7 +1582,22 @@ function buildScreeningSummary({ screenReport, passing, filteredOut, earlyFilter
     safetyFlags,
     tokenRisk: bestCandidateRisk,
     topTokenRisk: topCandidateRisk,
+    funnelSnapshot: _lastFunnelSnapshot ?? null,
+    weightsSummary: weightsSummary ?? null,
   };
+}
+
+// Ops-8.4: Format funnel snapshot as human-readable lines (Telegram-safe, no markdown tables)
+function buildFunnelSummaryLines(snap) {
+  if (!snap) return [];
+  return [
+    "Discovery Funnel",
+    `  API:          ${snap.stage_api_total ?? "?"}`,
+    `  Post Discover:${snap.stage_post_discover ?? "?"}`,
+    `  Eligible:     ${snap.stage_pre_slice ?? "?"}`,
+    `  Top Slice:    ${snap.stage_post_getTop ?? "?"}`,
+    `  Recon:        ${snap.stage_post_recon ?? "?"}`,
+  ];
 }
 
 function extractSkipReason(report) {
@@ -2839,6 +2854,7 @@ Commands:
   auto           Let the agent pick and deploy automatically
   /status        Refresh wallet + positions
   /candidates    Refresh top pool list
+  funnel         Show latest discovery funnel snapshot
   /briefing      Show morning briefing (last 24h)
   /learn         Study top LPers from the best current pool and save lessons
   /learn <addr>  Study top LPers from a specific pool address
@@ -2932,6 +2948,21 @@ Commands:
         console.log(formatCandidates(candidates));
         console.log();
       });
+      return;
+    }
+
+    if (input === "funnel" || input === "/funnel") {
+      if (!_lastFunnelSnapshot) {
+        console.log("\nNo funnel data yet. Run /candidates or wait for a screening cycle.\n");
+      } else {
+        const lines = buildFunnelSummaryLines(_lastFunnelSnapshot);
+        console.log("\n" + lines.join("\n") + "\n");
+        if (config.darwin?.enabled) {
+          const ws = getWeightsSummary();
+          if (ws) console.log(ws + "\n");
+        }
+      }
+      rl.prompt();
       return;
     }
 

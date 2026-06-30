@@ -1928,26 +1928,20 @@ console.log("\nGroup 20: Ops-9 Discovery Field Mapping\n");
 
 test("Ops-9 Test 1: discoverPools returns total mapped from scan_count with fallback", () => {
   const content = readFileSync("tools/screening.js", "utf8");
-  // The return block of discoverPools must map scan_count (not raw data.total alone)
-  const fnIdx = content.indexOf("export async function discoverPools(");
-  assert.ok(fnIdx >= 0, "discoverPools must be exported");
-  const returnIdx = content.indexOf("return {", fnIdx);
-  assert.ok(returnIdx >= 0, "discoverPools must have a return block");
-  const returnBlock = content.slice(returnIdx, content.indexOf("};", returnIdx) + 2);
-  assert.ok(returnBlock.includes("scan_count"), "discoverPools return must reference scan_count");
-  assert.ok(returnBlock.includes("data.count"), "discoverPools return must reference data.count for api_count");
-  assert.ok(returnBlock.includes("api_count"), "discoverPools must expose api_count field");
+  // Search for the unique return-block literal from discoverPools — CRLF-safe, no slice logic
+  assert.ok(content.includes("data.scan_count ?? data.total ?? null"),
+    "discoverPools return must map scan_count with fallback to data.total");
+  assert.ok(content.includes("api_count: data.count"),
+    "discoverPools must expose api_count from data.count");
 });
 
 test("Ops-9 Test 2: getTopCandidates total_screened uses api_count not pools.length alone", () => {
   const content = readFileSync("tools/screening.js", "utf8");
-  const fnIdx = content.indexOf("export async function getTopCandidates(");
-  assert.ok(fnIdx >= 0, "getTopCandidates must be exported");
-  const returnIdx = content.lastIndexOf("return {", fnIdx + content.slice(fnIdx).indexOf("\n}") + 2);
-  const searchFrom = content.indexOf("return {", fnIdx);
-  const returnBlock = content.slice(searchFrom, content.indexOf("};", searchFrom) + 2);
-  assert.ok(returnBlock.includes("api_count"), "getTopCandidates return must use api_count for total_screened");
-  assert.ok(!returnBlock.includes("total_screened: pools.length"), "total_screened must not be hardcoded to pools.length alone");
+  // Search for the unique literal from the getTopCandidates return block
+  assert.ok(content.includes("discovery.api_count ?? pools.length"),
+    "getTopCandidates total_screened must use discovery.api_count with pools.length fallback");
+  assert.ok(!content.includes("total_screened: pools.length"),
+    "total_screened must not be hardcoded to pools.length alone");
 });
 
 test("Ops-9 Test 3: fetchPoolDiscoveryPage emits diagnostic log with scan_count and count", () => {

@@ -77,7 +77,7 @@ export const config = {
     minQuoteOrganic:   u.minQuoteOrganic   ?? 60,
     minHolders:        u.minHolders        ?? 500,
     minMcap:           u.minMcap           ?? 150_000,
-    maxMcap:           u.maxMcap           ?? 10_000_000,
+    maxMcap:           u.maxMcap           ?? 100_000_000,
     minBinStep:        u.minBinStep        ?? 80,
     maxBinStep:        u.maxBinStep        ?? 125,
     timeframe:         u.timeframe         ?? "5m",
